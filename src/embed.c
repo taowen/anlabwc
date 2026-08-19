@@ -160,6 +160,52 @@ anlabwc_request_stop(void)
 	}
 }
 
+static void
+write_embed_rc(const char *runtime_dir)
+{
+	char dir[700];
+	char path[720];
+	FILE *f;
+
+	snprintf(dir, sizeof(dir), "%s/labwc", runtime_dir);
+	if (mkdir(dir, 0700) < 0 && errno != EEXIST) {
+		wlr_log(WLR_ERROR, "mkdir %s: %s", dir, strerror(errno));
+		return;
+	}
+	snprintf(path, sizeof(path), "%s/rc.xml", dir);
+	f = fopen(path, "w");
+	if (!f) {
+		wlr_log(WLR_ERROR, "write %s: %s", path, strerror(errno));
+		return;
+	}
+	fputs(
+		"<?xml version=\"1.0\"?>\n"
+		"<labwc_config>\n"
+		"  <core>\n"
+		"    <decoration>server</decoration>\n"
+		"    <xwaylandPersistence>yes</xwaylandPersistence>\n"
+		"  </core>\n"
+		"  <theme>\n"
+		"    <font place=\"ActiveWindow\" name=\"sans\" size=\"12\"/>\n"
+		"    <font place=\"InactiveWindow\" name=\"sans\" size=\"12\"/>\n"
+		"    <titlebar>\n"
+		"      <layout>menu:iconify,max,close</layout>\n"
+		"      <showTitle>yes</showTitle>\n"
+		"    </titlebar>\n"
+		"  </theme>\n"
+		"  <mouse>\n"
+		"    <default />\n"
+		"    <context name=\"Titlebar\">\n"
+		"      <mousebind button=\"Left\" action=\"Drag\">\n"
+		"        <action name=\"Move\"/>\n"
+		"      </mousebind>\n"
+		"    </context>\n"
+		"  </mouse>\n"
+		"</labwc_config>\n", f);
+	fclose(f);
+	wlr_log(WLR_INFO, "embed rc.xml %s", path);
+}
+
 ANLABWC_API int
 anlabwc_run(struct ANativeWindow *window, int width, int height,
 	const char *runtime_dir)
@@ -182,6 +228,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 
 	setenv("XDG_RUNTIME_DIR", runtime_dir, 1);
 	setenv("HOME", runtime_dir, 1);
+	setenv("XDG_CONFIG_HOME", runtime_dir, 1);
 	setenv("WLR_RENDERER", "pixman", 1);
 	setenv("XDG_SESSION_TYPE", "wayland", 1);
 	setenv("XDG_CURRENT_DESKTOP", "wlroots:labwc", 1);
@@ -273,6 +320,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	server.embed.input_wr = fds[1];
 	server.embed.android = NULL;
 
+	write_embed_rc(runtime_dir);
 	session_environment_init();
 	rcxml_read(rc.config_file);
 

@@ -1052,13 +1052,16 @@ handle_new_xdg_toplevel(struct wl_listener *listener, void *data)
 
 	/*
 	 * The xdg_toplevel_decoration and kde_server_decoration protocols
-	 * expects clients to use client side decorations unless server side
-	 * decorations are negotiated. So we default to client side ones here.
-	 *
-	 * TODO: We may want to assign the default based on a new rc.xml
-	 *       config option like "enforce-server" in the future.
+	 * expect clients to use client side decorations unless server side
+	 * decorations are negotiated. Desktop labwc therefore defaults to
+	 * client-side here. On Android, Xwayland and simple shm clients do
+	 * not draw CSD, and titlebars are the only way to drag windows.
 	 */
+#if HAVE_ANDROID_EMBED
+	view->ssd_preference = LAB_SSD_PREF_UNSPEC;
+#else
 	view->ssd_preference = LAB_SSD_PREF_CLIENT;
+#endif
 
 	/*
 	 * xdg_toplevel_decoration and kde_server_decoration use this
