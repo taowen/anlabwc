@@ -836,7 +836,7 @@ fill_libinput_category(xmlNode *node)
 				LIBINPUT_CONFIG_3FG_DRAG_ENABLED_3FG;
 		} else if (!strcmp(content, "4")) {
 			category->three_finger_drag =
-				LIBINPUT_CONFIG_3FG_DRAG_ENABLED_4FG;
+				LIBINPUT_CONFIG_3FG_DRAG_ENABLED_3FG;
 		} else {
 			int ret = parse_bool(content, -1);
 			if (ret < 0) {

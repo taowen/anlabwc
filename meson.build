@@ -201,6 +201,8 @@ if have_android_embed
   labwc_deps += [
     cc.find_library('android'),
     cc.find_library('log'),
+    cc.find_library('EGL'),
+    cc.find_library('GLESv2'),
   ]
 endif
 

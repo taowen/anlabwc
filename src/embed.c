@@ -28,6 +28,7 @@
 #include "theme.h"
 
 #ifdef __ANDROID__
+#include <android/hardware_buffer.h>
 #include <android/log.h>
 #include <android/native_window.h>
 #endif
@@ -36,6 +37,7 @@ enum {
 	EMBED_PTR_MOTION = 1,
 	EMBED_PTR_BUTTON,
 	EMBED_KEY,
+	EMBED_REDRAW,
 };
 
 struct embed_msg {
@@ -97,6 +99,9 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		wlr_android_keyboard_key(server.embed.android, msg.keycode,
 			msg.pressed != 0);
 		break;
+	case EMBED_REDRAW:
+		wlr_android_schedule_frame(server.embed.android);
+		break;
 	default:
 		break;
 	}
@@ -127,6 +132,17 @@ anlabwc_key(int evdev, int pressed)
 		.keycode = (uint32_t)evdev,
 		.pressed = pressed,
 	};
+	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_present_ahb(struct AHardwareBuffer *ahb, int x, int y, int w, int h)
+{
+	if (!ahb || w <= 0 || h <= 0 || !server.embed.android) {
+		return -1;
+	}
+	wlr_android_present_ahb(server.embed.android, ahb, x, y, w, h);
+	struct embed_msg msg = { .type = EMBED_REDRAW };
 	return send_msg(&msg);
 }
 

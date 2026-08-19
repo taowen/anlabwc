@@ -1,8 +1,16 @@
+#define EGL_EGLEXT_PROTOTYPES
+#define GL_GLEXT_PROTOTYPES
+
 #include <assert.h>
 #include <drm_fourcc.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <string.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <android/hardware_buffer.h>
 #include <android/native_window.h>
 #include <wlr/interfaces/wlr_output.h>
 #include <wlr/types/wlr_buffer.h>
@@ -17,6 +25,42 @@ static const uint32_t SUPPORTED_OUTPUT_STATE =
 	WLR_OUTPUT_STATE_ENABLED |
 	WLR_OUTPUT_STATE_MODE;
 
+static const char *COMP_VS =
+	"attribute vec2 a_pos;\n"
+	"attribute vec2 a_uv;\n"
+	"varying vec2 v_uv;\n"
+	"void main(){\n"
+	"  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+	"  v_uv = a_uv;\n"
+	"}\n";
+
+static const char *COMP_FS =
+	"precision mediump float;\n"
+	"uniform sampler2D u_tex;\n"
+	"varying vec2 v_uv;\n"
+	"void main(){\n"
+	"  vec4 c = texture2D(u_tex, v_uv);\n"
+	"  gl_FragColor = vec4(c.b, c.g, c.r, c.a);\n"
+	"}\n";
+
+static const char *AHB_VS =
+	"attribute vec2 a_pos;\n"
+	"attribute vec2 a_uv;\n"
+	"varying vec2 v_uv;\n"
+	"void main(){\n"
+	"  gl_Position = vec4(a_pos, 0.0, 1.0);\n"
+	"  v_uv = a_uv;\n"
+	"}\n";
+
+static const char *AHB_FS =
+	"#extension GL_OES_EGL_image_external : require\n"
+	"precision mediump float;\n"
+	"uniform samplerExternalOES u_tex;\n"
+	"varying vec2 v_uv;\n"
+	"void main(){\n"
+	"  gl_FragColor = texture2D(u_tex, v_uv);\n"
+	"}\n";
+
 static struct wlr_android_backend *backend_from_output(
 		struct wlr_output *wlr_output) {
 	struct wlr_android_backend *backend =
@@ -24,39 +68,387 @@ static struct wlr_android_backend *backend_from_output(
 	return backend;
 }
 
+static GLuint compile_shader(GLenum type, const char *src) {
+	GLuint sh = glCreateShader(type);
+	GLint ok = 0;
+	glShaderSource(sh, 1, &src, NULL);
+	glCompileShader(sh);
+	glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+	if (!ok) {
+		char log[256];
+		glGetShaderInfoLog(sh, sizeof(log), NULL, log);
+		wlr_log(WLR_ERROR, "shader compile: %s", log);
+		glDeleteShader(sh);
+		return 0;
+	}
+	return sh;
+}
+
+static GLuint link_program(const char *vs, const char *fs) {
+	GLuint v = compile_shader(GL_VERTEX_SHADER, vs);
+	GLuint f = compile_shader(GL_FRAGMENT_SHADER, fs);
+	GLuint p;
+	GLint ok = 0;
+	if (!v || !f) {
+		if (v) {
+			glDeleteShader(v);
+		}
+		if (f) {
+			glDeleteShader(f);
+		}
+		return 0;
+	}
+	p = glCreateProgram();
+	glAttachShader(p, v);
+	glAttachShader(p, f);
+	glLinkProgram(p);
+	glDeleteShader(v);
+	glDeleteShader(f);
+	glGetProgramiv(p, GL_LINK_STATUS, &ok);
+	if (!ok) {
+		char log[256];
+		glGetProgramInfoLog(p, sizeof(log), NULL, log);
+		wlr_log(WLR_ERROR, "program link: %s", log);
+		glDeleteProgram(p);
+		return 0;
+	}
+	return p;
+}
+
+static void gles_destroy_image(struct wlr_android_gles *g) {
+	if (g->image != EGL_NO_IMAGE_KHR && g->dpy != EGL_NO_DISPLAY) {
+		eglDestroyImageKHR(g->dpy, g->image);
+		g->image = EGL_NO_IMAGE_KHR;
+	}
+	g->image_ahb = NULL;
+}
+
+static void gles_fini(struct wlr_android_backend *backend) {
+	struct wlr_android_gles *g = &backend->gles;
+	if (g->dpy == EGL_NO_DISPLAY) {
+		return;
+	}
+	eglMakeCurrent(g->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+	gles_destroy_image(g);
+	if (g->tex_comp) {
+		glDeleteTextures(1, &g->tex_comp);
+		g->tex_comp = 0;
+	}
+	if (g->tex_ahb) {
+		glDeleteTextures(1, &g->tex_ahb);
+		g->tex_ahb = 0;
+	}
+	if (g->prog_comp) {
+		glDeleteProgram(g->prog_comp);
+		g->prog_comp = 0;
+	}
+	if (g->prog_ahb) {
+		glDeleteProgram(g->prog_ahb);
+		g->prog_ahb = 0;
+	}
+	if (g->ctx != EGL_NO_CONTEXT) {
+		eglDestroyContext(g->dpy, g->ctx);
+		g->ctx = EGL_NO_CONTEXT;
+	}
+	if (g->surf != EGL_NO_SURFACE) {
+		eglDestroySurface(g->dpy, g->surf);
+		g->surf = EGL_NO_SURFACE;
+	}
+	g->ok = false;
+}
+
+static bool gles_create_window_surface(struct wlr_android_backend *backend) {
+	struct wlr_android_gles *g = &backend->gles;
+	EGLint vis = 0;
+	EGLint sw = 0, sh = 0;
+
+	if (g->dpy == EGL_NO_DISPLAY || !g->config || g->ctx == EGL_NO_CONTEXT) {
+		return false;
+	}
+	if (g->surf != EGL_NO_SURFACE) {
+		eglMakeCurrent(g->dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
+		eglDestroySurface(g->dpy, g->surf);
+		g->surf = EGL_NO_SURFACE;
+	}
+	if (!eglGetConfigAttrib(g->dpy, g->config, EGL_NATIVE_VISUAL_ID, &vis)) {
+		wlr_log(WLR_ERROR, "EGL_NATIVE_VISUAL_ID failed");
+		return false;
+	}
+	/* Keep the Surface size; only the format must match the EGL config.
+	 * WINDOW_FORMAT_RGBA_8888 here would force a CPU producer on some GPUs. */
+	if (ANativeWindow_setBuffersGeometry(backend->window, 0, 0, vis) != 0) {
+		wlr_log(WLR_ERROR, "setBuffersGeometry vis=0x%x failed", vis);
+	}
+	g->surf = eglCreateWindowSurface(g->dpy, g->config,
+		(EGLNativeWindowType)backend->window, NULL);
+	if (g->surf == EGL_NO_SURFACE) {
+		wlr_log(WLR_ERROR, "eglCreateWindowSurface failed 0x%x", eglGetError());
+		return false;
+	}
+	if (!eglMakeCurrent(g->dpy, g->surf, g->surf, g->ctx)) {
+		wlr_log(WLR_ERROR, "eglMakeCurrent window failed 0x%x", eglGetError());
+		return false;
+	}
+	eglSwapInterval(g->dpy, 0);
+	eglQuerySurface(g->dpy, g->surf, EGL_WIDTH, &sw);
+	eglQuerySurface(g->dpy, g->surf, EGL_HEIGHT, &sh);
+	wlr_log(WLR_INFO, "EGL window surface %dx%d vis=0x%x", sw, sh, vis);
+	return true;
+}
+
+static bool gles_init(struct wlr_android_backend *backend) {
+	struct wlr_android_gles *g = &backend->gles;
+	const EGLint cfg_attr[] = {
+		EGL_SURFACE_TYPE, EGL_WINDOW_BIT,
+		EGL_RED_SIZE, 8,
+		EGL_GREEN_SIZE, 8,
+		EGL_BLUE_SIZE, 8,
+		EGL_ALPHA_SIZE, 8,
+		EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+		EGL_NONE,
+	};
+	const EGLint ctx_attr[] = {
+		EGL_CONTEXT_CLIENT_VERSION, 2,
+		EGL_NONE,
+	};
+	EGLint n = 0;
+
+	if (g->ok) {
+		return true;
+	}
+	g->dpy = EGL_NO_DISPLAY;
+	g->ctx = EGL_NO_CONTEXT;
+	g->surf = EGL_NO_SURFACE;
+	g->image = EGL_NO_IMAGE_KHR;
+
+	g->dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+	if (g->dpy == EGL_NO_DISPLAY || !eglInitialize(g->dpy, NULL, NULL)) {
+		wlr_log(WLR_ERROR, "eglInitialize failed");
+		return false;
+	}
+	if (!eglBindAPI(EGL_OPENGL_ES_API)) {
+		wlr_log(WLR_ERROR, "eglBindAPI failed");
+		return false;
+	}
+	if (!eglChooseConfig(g->dpy, cfg_attr, &g->config, 1, &n) || n < 1) {
+		wlr_log(WLR_ERROR, "eglChooseConfig failed");
+		return false;
+	}
+	g->ctx = eglCreateContext(g->dpy, g->config, EGL_NO_CONTEXT, ctx_attr);
+	if (g->ctx == EGL_NO_CONTEXT) {
+		wlr_log(WLR_ERROR, "eglCreateContext failed 0x%x", eglGetError());
+		return false;
+	}
+	if (!gles_create_window_surface(backend)) {
+		return false;
+	}
+	g->prog_comp = link_program(COMP_VS, COMP_FS);
+	g->prog_ahb = link_program(AHB_VS, AHB_FS);
+	if (!g->prog_comp || !g->prog_ahb) {
+		gles_fini(backend);
+		return false;
+	}
+	g->a_comp_pos = glGetAttribLocation(g->prog_comp, "a_pos");
+	g->a_comp_uv = glGetAttribLocation(g->prog_comp, "a_uv");
+	g->a_ahb_pos = glGetAttribLocation(g->prog_ahb, "a_pos");
+	g->a_ahb_uv = glGetAttribLocation(g->prog_ahb, "a_uv");
+	glGenTextures(1, &g->tex_comp);
+	glGenTextures(1, &g->tex_ahb);
+	glBindTexture(GL_TEXTURE_2D, g->tex_comp);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, g->tex_ahb);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	g->ok = true;
+	wlr_log(WLR_INFO, "Android GLES scanout ready");
+	return true;
+}
+
+static void upload_comp(struct wlr_android_gles *g, const uint8_t *src,
+		size_t src_stride, int buf_w, int buf_h) {
+	int y;
+	glBindTexture(GL_TEXTURE_2D, g->tex_comp);
+	if (g->tex_w != buf_w || g->tex_h != buf_h) {
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buf_w, buf_h, 0,
+			GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+		g->tex_w = buf_w;
+		g->tex_h = buf_h;
+	}
+	glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+	for (y = 0; y < buf_h; y++) {
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, buf_w, 1,
+			GL_RGBA, GL_UNSIGNED_BYTE, src + (size_t)y * src_stride);
+	}
+}
+
+static void draw_fullscreen(struct wlr_android_gles *g) {
+	static const GLfloat pos[] = {
+		-1.f, -1.f,  1.f, -1.f,  -1.f, 1.f,  1.f, 1.f,
+	};
+	static const GLfloat uv[] = {
+		0.f, 1.f,  1.f, 1.f,  0.f, 0.f,  1.f, 0.f,
+	};
+	glUseProgram(g->prog_comp);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_2D, g->tex_comp);
+	glUniform1i(glGetUniformLocation(g->prog_comp, "u_tex"), 0);
+	glEnableVertexAttribArray((GLuint)g->a_comp_pos);
+	glEnableVertexAttribArray((GLuint)g->a_comp_uv);
+	glVertexAttribPointer((GLuint)g->a_comp_pos, 2, GL_FLOAT, GL_FALSE, 0, pos);
+	glVertexAttribPointer((GLuint)g->a_comp_uv, 2, GL_FLOAT, GL_FALSE, 0, uv);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
+
+static bool bind_ahb(struct wlr_android_backend *backend, AHardwareBuffer *ahb) {
+	struct wlr_android_gles *g = &backend->gles;
+	EGLClientBuffer client;
+	const EGLint attribs[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+
+	if (g->image_ahb == ahb && g->image != EGL_NO_IMAGE_KHR) {
+		return true;
+	}
+	gles_destroy_image(g);
+	client = eglGetNativeClientBufferANDROID(ahb);
+	if (!client) {
+		wlr_log(WLR_ERROR, "eglGetNativeClientBufferANDROID failed");
+		return false;
+	}
+	g->image = eglCreateImageKHR(g->dpy, EGL_NO_CONTEXT,
+		EGL_NATIVE_BUFFER_ANDROID, client, attribs);
+	if (g->image == EGL_NO_IMAGE_KHR) {
+		wlr_log(WLR_ERROR, "eglCreateImageKHR AHB failed 0x%x", eglGetError());
+		return false;
+	}
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, g->tex_ahb);
+	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, g->image);
+	if (glGetError() != GL_NO_ERROR) {
+		wlr_log(WLR_ERROR, "glEGLImageTargetTexture2DOES failed");
+		gles_destroy_image(g);
+		return false;
+	}
+	g->image_ahb = ahb;
+	return true;
+}
+
+static void draw_ahb(struct wlr_android_backend *backend, int x, int y, int w, int h) {
+	struct wlr_android_gles *g = &backend->gles;
+	float W = (float)backend->width;
+	float H = (float)backend->height;
+	float x0, x1, y0, y1;
+	GLfloat pos[8];
+	static const GLfloat uv[] = {
+		0.f, 0.f,  1.f, 0.f,  0.f, 1.f,  1.f, 1.f,
+	};
+
+	if (W <= 0.f || H <= 0.f || w <= 0 || h <= 0) {
+		return;
+	}
+	x0 = 2.f * (float)x / W - 1.f;
+	x1 = 2.f * (float)(x + w) / W - 1.f;
+	y0 = 1.f - 2.f * (float)y / H;
+	y1 = 1.f - 2.f * (float)(y + h) / H;
+	pos[0] = x0; pos[1] = y0;
+	pos[2] = x1; pos[3] = y0;
+	pos[4] = x0; pos[5] = y1;
+	pos[6] = x1; pos[7] = y1;
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+	glUseProgram(g->prog_ahb);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, g->tex_ahb);
+	glUniform1i(glGetUniformLocation(g->prog_ahb, "u_tex"), 0);
+	glEnableVertexAttribArray((GLuint)g->a_ahb_pos);
+	glEnableVertexAttribArray((GLuint)g->a_ahb_uv);
+	glVertexAttribPointer((GLuint)g->a_ahb_pos, 2, GL_FLOAT, GL_FALSE, 0, pos);
+	glVertexAttribPointer((GLuint)g->a_ahb_uv, 2, GL_FLOAT, GL_FALSE, 0, uv);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glDisable(GL_BLEND);
+}
+
 static void blit_to_window(struct wlr_android_backend *backend,
 		const uint8_t *src, uint32_t src_fmt, size_t src_stride,
 		int buf_w, int buf_h) {
-	ANativeWindow_Buffer dst;
-	if (ANativeWindow_lock(backend->window, &dst, NULL) != 0) {
-		wlr_log(WLR_ERROR, "ANativeWindow_lock failed");
+	AHardwareBuffer *ahb = NULL;
+	int ox = 0, oy = 0, ow = 0, oh = 0;
+	bool overlay = false;
+	(void)src_fmt;
+
+	if (!gles_init(backend)) {
 		return;
 	}
-
-	int copy_w = buf_w < dst.width ? buf_w : dst.width;
-	int copy_h = buf_h < dst.height ? buf_h : dst.height;
-	size_t dst_stride = (size_t)dst.stride * 4;
-	uint8_t *d = dst.bits;
-	/* pixman ARGB8888 LE is BGRA bytes; Android RGBA_8888 is RGBA bytes. */
-	bool swizzle = src_fmt == DRM_FORMAT_ARGB8888
-		|| src_fmt == DRM_FORMAT_XRGB8888;
-
-	for (int y = 0; y < copy_h; y++) {
-		const uint8_t *srow = src + (size_t)y * src_stride;
-		uint8_t *drow = d + (size_t)y * dst_stride;
-		if (!swizzle) {
-			memcpy(drow, srow, (size_t)copy_w * 4);
-			continue;
-		}
-		for (int x = 0; x < copy_w; x++) {
-			drow[x * 4 + 0] = srow[x * 4 + 2];
-			drow[x * 4 + 1] = srow[x * 4 + 1];
-			drow[x * 4 + 2] = srow[x * 4 + 0];
-			drow[x * 4 + 3] = srow[x * 4 + 3];
-		}
+	if (!eglMakeCurrent(backend->gles.dpy, backend->gles.surf,
+			backend->gles.surf, backend->gles.ctx)) {
+		wlr_log(WLR_ERROR, "eglMakeCurrent scanout failed");
+		return;
 	}
+	glViewport(0, 0, backend->width, backend->height);
+	glClearColor(0.f, 0.f, 0.f, 1.f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	glDisable(GL_BLEND);
+	upload_comp(&backend->gles, src, src_stride, buf_w, buf_h);
+	draw_fullscreen(&backend->gles);
 
-	ANativeWindow_unlockAndPost(backend->window);
+	pthread_mutex_lock(&backend->overlay.lock);
+	if (backend->overlay.ready && backend->overlay.ahb) {
+		ahb = backend->overlay.ahb;
+		AHardwareBuffer_acquire(ahb);
+		ox = backend->overlay.x;
+		oy = backend->overlay.y;
+		ow = backend->overlay.w;
+		oh = backend->overlay.h;
+		overlay = true;
+	}
+	pthread_mutex_unlock(&backend->overlay.lock);
+
+	if (overlay) {
+		if (bind_ahb(backend, ahb)) {
+			wlr_log(WLR_INFO, "GLES AHB overlay %dx%d at %d,%d", ow, oh, ox, oy);
+			draw_ahb(backend, ox, oy, ow, oh);
+		}
+		AHardwareBuffer_release(ahb);
+	}
+	if (!eglSwapBuffers(backend->gles.dpy, backend->gles.surf)) {
+		wlr_log(WLR_ERROR, "eglSwapBuffers failed 0x%x", eglGetError());
+	}
+}
+
+void wlr_android_present_ahb(struct wlr_backend *wlr_backend,
+		struct AHardwareBuffer *ahb, int x, int y, int w, int h) {
+	struct wlr_android_backend *backend;
+	AHardwareBuffer *old;
+
+	if (!wlr_backend_is_android(wlr_backend) || !ahb || w <= 0 || h <= 0) {
+		return;
+	}
+	backend = android_backend_from_backend(wlr_backend);
+	AHardwareBuffer_acquire(ahb);
+	pthread_mutex_lock(&backend->overlay.lock);
+	old = backend->overlay.ahb;
+	backend->overlay.ahb = ahb;
+	backend->overlay.x = x;
+	backend->overlay.y = y;
+	backend->overlay.w = w;
+	backend->overlay.h = h;
+	backend->overlay.ready = true;
+	pthread_mutex_unlock(&backend->overlay.lock);
+	if (old) {
+		AHardwareBuffer_release(old);
+	}
+}
+
+void wlr_android_schedule_frame(struct wlr_backend *wlr_backend) {
+	struct wlr_android_backend *backend;
+
+	if (!wlr_backend_is_android(wlr_backend)) {
+		return;
+	}
+	backend = android_backend_from_backend(wlr_backend);
+	wlr_output_schedule_frame(&backend->output);
 }
 
 static bool output_test(struct wlr_output *wlr_output,
@@ -98,8 +490,9 @@ static bool output_commit(struct wlr_output *wlr_output,
 		backend->frame_delay = 1000000 / refresh;
 		backend->width = state->custom_mode.width;
 		backend->height = state->custom_mode.height;
-		ANativeWindow_setBuffersGeometry(backend->window,
-			backend->width, backend->height, WINDOW_FORMAT_RGBA_8888);
+		if (backend->gles.ok) {
+			gles_create_window_surface(backend);
+		}
 	}
 
 	if ((state->committed & WLR_OUTPUT_STATE_BUFFER) && state->buffer) {
@@ -134,6 +527,14 @@ static bool output_commit(struct wlr_output *wlr_output,
 static void output_destroy(struct wlr_output *wlr_output) {
 	struct wlr_android_backend *backend = backend_from_output(wlr_output);
 
+	gles_fini(backend);
+	pthread_mutex_lock(&backend->overlay.lock);
+	if (backend->overlay.ahb) {
+		AHardwareBuffer_release(backend->overlay.ahb);
+		backend->overlay.ahb = NULL;
+		backend->overlay.ready = false;
+	}
+	pthread_mutex_unlock(&backend->overlay.lock);
 	wlr_output_finish(wlr_output);
 	if (backend->frame_timer) {
 		wl_event_source_remove(backend->frame_timer);
@@ -164,7 +565,7 @@ bool android_output_init(struct wlr_android_backend *backend) {
 	wlr_output_state_finish(&state);
 
 	wlr_output_set_name(&backend->output, "ANLABWC-1");
-	wlr_output_set_description(&backend->output, "Android ANativeWindow");
+	wlr_output_set_description(&backend->output, "Android ANativeWindow GLES");
 
 	backend->frame_timer = wl_event_loop_add_timer(backend->event_loop,
 		signal_frame, backend);
