@@ -26,6 +26,7 @@
 
 #include "buffer.h"
 #include <assert.h>
+#include <math.h>
 #include <stdlib.h>
 #include <drm_fourcc.h>
 #include <wlr/interfaces/wlr_buffer.h>
@@ -84,18 +85,37 @@ data_buffer_from_buffer(struct wlr_buffer *buffer)
 struct lab_data_buffer *
 buffer_adopt_cairo_surface(cairo_surface_t *surface)
 {
-	assert(cairo_surface_get_type(surface) == CAIRO_SURFACE_TYPE_IMAGE);
-	assert(cairo_image_surface_get_format(surface) == CAIRO_FORMAT_ARGB32);
+	if (!surface || cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		wlr_log(WLR_ERROR, "cairo surface unusable: %s",
+			surface ? cairo_status_to_string(cairo_surface_status(surface))
+				: "NULL");
+		return NULL;
+	}
+	if (cairo_surface_get_type(surface) != CAIRO_SURFACE_TYPE_IMAGE) {
+		wlr_log(WLR_ERROR, "cairo surface is not an image");
+		return NULL;
+	}
+
+	cairo_format_t fmt = cairo_image_surface_get_format(surface);
+	if (fmt != CAIRO_FORMAT_ARGB32) {
+		wlr_log(WLR_ERROR, "cairo image format %d, want ARGB32", (int)fmt);
+		return NULL;
+	}
 
 	int width = cairo_image_surface_get_width(surface);
 	int height = cairo_image_surface_get_height(surface);
+	unsigned char *data = cairo_image_surface_get_data(surface);
+	if (!data || width <= 0 || height <= 0) {
+		wlr_log(WLR_ERROR, "cairo image has no pixel data (%dx%d)",
+			width, height);
+		return NULL;
+	}
 
 	struct lab_data_buffer *buffer = znew(*buffer);
 	wlr_buffer_init(&buffer->base, &data_buffer_impl, width, height);
 
 	buffer->surface = surface;
-	buffer->data = cairo_image_surface_get_data(buffer->surface);
-	assert(buffer->data);
+	buffer->data = data;
 	buffer->format = DRM_FORMAT_ARGB8888;
 	buffer->stride = cairo_image_surface_get_stride(buffer->surface);
 	buffer->logical_width = width;
@@ -115,10 +135,25 @@ buffer_create_cairo(uint32_t logical_width, uint32_t logical_height, float scale
 	}
 
 	/* Create an image surface with the scaled size */
+	int pixel_w = (int)lroundf((float)logical_width * scale);
+	int pixel_h = (int)lroundf((float)logical_height * scale);
+	if (pixel_w <= 0 || pixel_h <= 0 || pixel_w > 32767 || pixel_h > 32767) {
+		wlr_log(WLR_ERROR,
+			"Failed to create cairo buffer of %ux%u scale=%f (pixel %dx%d)",
+			logical_width, logical_height, scale, pixel_w, pixel_h);
+		return NULL;
+	}
+
 	cairo_surface_t *surface =
-		cairo_image_surface_create(CAIRO_FORMAT_ARGB32,
-			lroundf(logical_width * scale),
-			lroundf(logical_height * scale));
+		cairo_image_surface_create(CAIRO_FORMAT_ARGB32, pixel_w, pixel_h);
+	cairo_status_t st = cairo_surface_status(surface);
+	if (st != CAIRO_STATUS_SUCCESS) {
+		wlr_log(WLR_ERROR,
+			"cairo_image_surface_create %dx%d: %s",
+			pixel_w, pixel_h, cairo_status_to_string(st));
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
 
 	/**
 	 * Tell cairo about the device scale so we can keep drawing in unscaled
@@ -134,6 +169,10 @@ buffer_create_cairo(uint32_t logical_width, uint32_t logical_height, float scale
 	 * logical size, and create a cairo context for drawing
 	 */
 	struct lab_data_buffer *buffer = buffer_adopt_cairo_surface(surface);
+	if (!buffer) {
+		cairo_surface_destroy(surface);
+		return NULL;
+	}
 	buffer->logical_width = logical_width;
 	buffer->logical_height = logical_height;
 

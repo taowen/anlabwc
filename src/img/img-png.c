@@ -65,6 +65,10 @@ img_png_load(const char *filename)
 		struct lab_data_buffer *buffer = buffer_create_cairo(
 			cairo_image_surface_get_width(image),
 			cairo_image_surface_get_height(image), 1);
+		if (!buffer) {
+			cairo_surface_destroy(image);
+			return NULL;
+		}
 		cairo_t *cairo = cairo_create(buffer->surface);
 		cairo_set_source_surface(cairo, image, 0, 0);
 		cairo_paint(cairo);

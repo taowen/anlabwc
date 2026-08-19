@@ -52,6 +52,7 @@ add_project_arguments('-DLABWC_VERSION=@0@'.format(version), language: 'c')
 
 wlroots = dependency(
   'wlroots-0.20',
+  fallback: ['wlroots', 'wlroots'],
   default_options: ['default_library=static', 'examples=false'],
   version: ['>=0.20.1', '<0.21.0'],
 )
@@ -126,8 +127,17 @@ conf_data.set10('HAVE_RSVG', have_rsvg)
 
 conf_data.set10('HAVE_LIBSFDO', have_libsfdo)
 
+have_android_embed = false
+if not get_option('android-embed').disabled()
+  have_android_embed = cc.has_header('android/native_window.h')
+endif
+if get_option('android-embed').enabled() and not have_android_embed
+  error('android-embed requires <android/native_window.h>')
+endif
+conf_data.set10('HAVE_ANDROID_EMBED', have_android_embed)
+
 foreach sym : ['LIBINPUT_CONFIG_DRAG_LOCK_ENABLED_STICKY', 'LIBINPUT_CONFIG_3FG_DRAG_ENABLED_3FG']
-  has_sym = input.type_name() != 'internal' \
+  has_sym = input.found() and input.type_name() != 'internal' \
               and cc.has_header_symbol('libinput.h', sym, dependencies: input)
 	conf_data.set10('HAVE_' + sym, has_sym)
 endforeach
@@ -187,6 +197,12 @@ if have_libsfdo
     sfdo_icon,
   ]
 endif
+if have_android_embed
+  labwc_deps += [
+    cc.find_library('android'),
+    cc.find_library('log'),
+  ]
+endif
 
 subdir('include')
 subdir('src')
@@ -198,14 +214,26 @@ if dep_cmocka.found()
   subdir('t')
 endif
 
-executable(
-  meson.project_name(),
+anlabwc_lib = shared_library(
+  'anlabwc',
   labwc_sources,
   include_directories: [labwc_inc],
   dependencies: labwc_deps,
   install: true,
   link_args: link_args,
 )
+
+executable(
+  meson.project_name(),
+  'src/main.c',
+  include_directories: [labwc_inc],
+  dependencies: labwc_deps,
+  link_with: anlabwc_lib,
+  install: true,
+  link_args: link_args,
+)
+
+install_headers('include/anlabwc-embed.h')
 
 install_data('data/labwc.desktop', install_dir: get_option('datadir') / 'wayland-sessions')
 
