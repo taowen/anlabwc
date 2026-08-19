@@ -17,17 +17,6 @@
 #include "translate.h"
 #include "menu/menu.h"
 
-/*
- * Globals
- *
- * Rationale: these are unlikely to ever have more than one instance
- * per process, and need to last for the lifetime of the process.
- * Accessing them indirectly through pointers embedded in every other
- * struct just adds noise to the code.
- */
-struct rcxml rc = { 0 };
-struct server server = { 0 };
-
 static const struct option long_options[] = {
 	{"config", required_argument, NULL, 'c'},
 	{"config-dir", required_argument, NULL, 'C'},

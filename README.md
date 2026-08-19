@@ -1,3 +1,24 @@
+# anlabwc
+
+Fork of [labwc](https://github.com/labwc/labwc) for
+[Ardesk](https://github.com/taowen/ardesk). Upstream stays `upstream`;
+this tree adds a wlroots `ANativeWindow` backend and `libanlabwc.so`
+so the compositor can `egl`/pixman-present onto an Android Surface in
+the same process as the Activity (no Anland daemon).
+
+Build the Android embed library:
+
+```
+meson setup build --cross-file android-cross.ini \
+  -Dandroid-embed=enabled -Dxwayland=disabled -Dsvg=disabled \
+  -Dicon=disabled -Dlabnag=disabled -Dnls=disabled \
+  -Dwlroots:backends=[] -Dwlroots:session=disabled \
+  -Dwlroots:renderers=[] -Dwlroots:examples=false
+```
+
+Public API: `include/anlabwc-embed.h` (`anlabwc_run` on the Activity
+window). License remains GPL-2.0-only.
+
 # labwc
 
 <h3 align="center">[<a

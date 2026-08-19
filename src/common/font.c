@@ -30,6 +30,12 @@ font_extents(struct font *font, const char *string)
 	PangoLayout *layout;
 
 	surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
+	if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS) {
+		wlr_log(WLR_ERROR, "cairo 1x1 probe: %s",
+			cairo_status_to_string(cairo_surface_status(surface)));
+		cairo_surface_destroy(surface);
+		return rect;
+	}
 	c = cairo_create(surface);
 	layout = pango_cairo_create_layout(c);
 	pango_context_set_round_glyph_positions(pango_layout_get_context(layout), false);

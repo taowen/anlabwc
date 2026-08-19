@@ -163,6 +163,17 @@ struct server {
 	struct headless {
 		struct wlr_backend *backend;
 	} headless;
+#if HAVE_ANDROID_EMBED
+	struct {
+		void *native_window;
+		int width;
+		int height;
+		struct wlr_backend *android;
+		int input_rd;
+		int input_wr;
+		struct wl_event_source *input_source;
+	} embed;
+#endif
 	struct wlr_session *session;
 	struct wlr_linux_dmabuf_v1 *linux_dmabuf;
 	struct wlr_compositor *compositor;
@@ -455,6 +466,9 @@ void handle_tearing_new_object(struct wl_listener *listener, void *data);
 void server_init(void);
 void server_start(void);
 void server_finish(void);
+#if HAVE_ANDROID_EMBED
+int anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data);
+#endif
 
 void create_constraint(struct wl_listener *listener, void *data);
 void constrain_cursor(struct wlr_pointer_constraint_v1

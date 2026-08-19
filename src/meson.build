@@ -9,7 +9,7 @@ labwc_sources = files(
   'interactive.c',
   'layers.c',
   'magnifier.c',
-  'main.c',
+  'globals.c',
   'node.c',
   'output.c',
   'output-state.c',
@@ -34,6 +34,10 @@ labwc_sources = files(
   'xdg.c',
   'xdg-popup.c',
 )
+
+if have_android_embed
+  labwc_sources += files('embed.c')
+endif
 
 if have_xwayland
   labwc_sources += files(

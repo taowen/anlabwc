@@ -1183,6 +1183,9 @@ rounded_rect(struct rounded_corner_ctx *ctx)
 	struct lab_data_buffer *buffer;
 	/* TODO: scale */
 	buffer = buffer_create_cairo(w, h, 1);
+	if (!buffer) {
+		return NULL;
+	}
 
 	cairo_surface_t *surf = buffer->surface;
 	cairo_t *cairo = cairo_create(surf);
@@ -1388,6 +1391,9 @@ create_titlebar_fill(cairo_pattern_t *pattern, int height)
 {
 	/* create 1px wide buffer to be stretched horizontally */
 	struct lab_data_buffer *fill = buffer_create_cairo(1, height, 1);
+	if (!fill) {
+		return NULL;
+	}
 
 	cairo_t *cairo = cairo_create(fill->surface);
 	cairo_set_source(cairo, pattern);
@@ -1641,6 +1647,11 @@ get_titlebar_height(struct theme *theme)
 {
 	int h = MAX(font_height(&rc.font_activewindow),
 		font_height(&rc.font_inactivewindow));
+	if (h < 0 || h > 256) {
+		wlr_log(WLR_ERROR,
+			"implausible font height %d, using window button height", h);
+		h = theme->window_button_height;
+	}
 	if (h < theme->window_button_height) {
 		h = theme->window_button_height;
 	}
@@ -1842,6 +1853,8 @@ theme_init(struct theme *theme, const char *theme_name)
 	paths_destroy(&paths);
 
 	post_processing(theme);
+	wlr_log(WLR_INFO, "theme titlebar_height=%d corner_radius=%d",
+		theme->titlebar_height, rc.corner_radius);
 	create_backgrounds(theme);
 	create_corners(theme);
 	load_buttons(theme);

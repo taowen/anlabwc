@@ -7,6 +7,10 @@
 #include <sys/wait.h>
 #include <wlr/backend/headless.h>
 #include <wlr/backend/multi.h>
+#if HAVE_ANDROID_EMBED
+#include <android/native_window.h>
+#include <wlr/backend/android.h>
+#endif
 #include <wlr/config.h>
 #include <wlr/render/allocator.h>
 #include <wlr/types/wlr_alpha_modifier_v1.h>
@@ -518,13 +522,41 @@ server_init(void)
 	 * output hardware. The autocreate option will choose the most suitable
 	 * backend based on the current environment, such as opening an x11
 	 * window if an x11 server is running.
+	 *
+	 * anlabwc embed uses a dedicated ANativeWindow backend instead of
+	 * DRM / nested Wayland.
 	 */
+#if HAVE_ANDROID_EMBED
+	if (server.embed.native_window) {
+		server.backend = wlr_multi_backend_create(server.wl_event_loop);
+		if (!server.backend) {
+			wlr_log(WLR_ERROR, "unable to create multi backend");
+			exit(EXIT_FAILURE);
+		}
+		server.embed.android = wlr_android_backend_create(
+			server.wl_event_loop,
+			(struct ANativeWindow *)server.embed.native_window,
+			server.embed.width, server.embed.height);
+		if (!server.embed.android) {
+			wlr_log(WLR_ERROR, "unable to create Android backend");
+			exit(EXIT_FAILURE);
+		}
+		wlr_multi_backend_add(server.backend, server.embed.android);
+		if (server.embed.input_rd >= 0) {
+			server.embed.input_source = wl_event_loop_add_fd(
+				server.wl_event_loop, server.embed.input_rd,
+				WL_EVENT_READABLE, anlabwc_embed_input_dispatch, NULL);
+		}
+	} else
+#endif
+	{
 	server.backend = wlr_backend_autocreate(
 		server.wl_event_loop, &server.session);
 	if (!server.backend) {
 		wlr_log(WLR_ERROR, "unable to create backend");
 		fprintf(stderr, helpful_seat_error_message);
 		exit(EXIT_FAILURE);
+	}
 	}
 
 	/* Create headless backend to enable adding virtual outputs later on */
@@ -848,7 +880,19 @@ void
 server_start(void)
 {
 	/* Add a Unix socket to the Wayland display. */
-	const char *socket = wl_display_add_socket_auto(server.wl_display);
+	const char *socket = NULL;
+#if HAVE_ANDROID_EMBED
+	if (server.embed.native_window) {
+		if (wl_display_add_socket(server.wl_display, "wayland-0") != 0) {
+			wlr_log_errno(WLR_ERROR, "unable to bind wayland-0");
+			exit(EXIT_FAILURE);
+		}
+		socket = "wayland-0";
+	} else
+#endif
+	{
+		socket = wl_display_add_socket_auto(server.wl_display);
+	}
 	if (!socket) {
 		wlr_log_errno(WLR_ERROR, "unable to open wayland socket");
 		exit(EXIT_FAILURE);
