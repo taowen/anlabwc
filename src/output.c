@@ -274,6 +274,10 @@ handle_output_frame(struct wl_listener *listener, void *data)
 
 	pending->tearing_page_flip = output_get_tearing_allowance(output);
 
+#if HAVE_ANDROID_EMBED
+	gpu_overlay_sync();
+#endif
+
 	lab_wlr_scene_output_commit(scene_output, pending);
 
 	struct timespec now = { 0 };

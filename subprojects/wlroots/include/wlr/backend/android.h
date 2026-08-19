@@ -31,9 +31,22 @@ void wlr_android_pointer_button(struct wlr_backend *backend, uint32_t button,
 void wlr_android_keyboard_key(struct wlr_backend *backend, uint32_t keycode,
 	bool pressed);
 
-/* GPU overlay: sample AHB onto the next EGL swap. */
+#define WLR_ANDROID_AHB_MAX 8
+
+/* GPU overlay dest rect in output layout coordinates. */
+struct wlr_android_ahb_blit {
+	struct AHardwareBuffer *ahb;
+	int x;
+	int y;
+	int w;
+	int h;
+};
+
+/* GPU overlays: sample AHBs onto the next EGL swap at compositor dests. */
 void wlr_android_present_ahb(struct wlr_backend *backend,
 	struct AHardwareBuffer *ahb, int x, int y, int w, int h);
+void wlr_android_present_ahb_slots(struct wlr_backend *backend,
+	const struct wlr_android_ahb_blit *slots, int n);
 void wlr_android_schedule_frame(struct wlr_backend *backend);
 
 #endif

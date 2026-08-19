@@ -14,14 +14,20 @@
 
 #define ANDROID_DEFAULT_REFRESH (60 * 1000)
 
-struct wlr_android_overlay {
-	pthread_mutex_t lock;
+#define WLR_ANDROID_AHB_MAX 8
+
+struct wlr_android_ahb_slot {
 	AHardwareBuffer *ahb;
 	int x;
 	int y;
 	int w;
 	int h;
-	bool ready;
+};
+
+struct wlr_android_overlay {
+	pthread_mutex_t lock;
+	struct wlr_android_ahb_slot slots[WLR_ANDROID_AHB_MAX];
+	int n;
 };
 
 struct wlr_android_gles {

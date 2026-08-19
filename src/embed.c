@@ -4,6 +4,7 @@
 
 #include "anlabwc-embed.h"
 
+#include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -14,6 +15,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include <wlr/backend/android.h>
 #include <wlr/util/log.h>
 #include <wlr/version.h>
@@ -26,6 +28,11 @@
 #include "labwc.h"
 #include "menu/menu.h"
 #include "theme.h"
+#include "view.h"
+#if HAVE_XWAYLAND
+#include "xwayland.h"
+#include <wlr/xwayland.h>
+#endif
 
 #ifdef __ANDROID__
 #include <android/hardware_buffer.h>
@@ -51,6 +58,275 @@ struct embed_msg {
 
 static char wayland_socket_path[512];
 static volatile bool running;
+
+enum gpu_bind_kind {
+	GPU_BIND_SCREEN = 0,
+	GPU_BIND_X11 = ANLABWC_GPU_X11,
+	GPU_BIND_WAYLAND = ANLABWC_GPU_WAYLAND,
+};
+
+#define GPU_BIND_MAX WLR_ANDROID_AHB_MAX
+
+struct gpu_bind {
+	int kind;
+	uint32_t id;
+	uint32_t pid;
+	int buf_w;
+	int buf_h;
+	int x;
+	int y;
+	struct AHardwareBuffer *ahb;
+};
+
+static pthread_mutex_t gpu_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct gpu_bind gpu_binds[GPU_BIND_MAX];
+static int gpu_n;
+
+static void
+gpu_bind_release(struct gpu_bind *b)
+{
+	if (b->ahb) {
+		AHardwareBuffer_release(b->ahb);
+		b->ahb = NULL;
+	}
+}
+
+static int
+gpu_bind_store(int kind, uint32_t id, uint32_t pid, int x, int y,
+	int buf_w, int buf_h, struct AHardwareBuffer *ahb)
+{
+	int i;
+	struct gpu_bind *slot = NULL;
+
+	if (!ahb || buf_w <= 0 || buf_h <= 0) {
+		return -1;
+	}
+	pthread_mutex_lock(&gpu_lock);
+	for (i = 0; i < gpu_n; i++) {
+		if (gpu_binds[i].kind == kind && gpu_binds[i].id == id
+				&& gpu_binds[i].pid == pid) {
+			slot = &gpu_binds[i];
+			break;
+		}
+	}
+	if (!slot) {
+		if (gpu_n >= GPU_BIND_MAX) {
+			pthread_mutex_unlock(&gpu_lock);
+			return -1;
+		}
+		slot = &gpu_binds[gpu_n++];
+		memset(slot, 0, sizeof(*slot));
+	}
+	gpu_bind_release(slot);
+	AHardwareBuffer_acquire(ahb);
+	slot->kind = kind;
+	slot->id = id;
+	slot->pid = pid;
+	slot->x = x;
+	slot->y = y;
+	slot->buf_w = buf_w;
+	slot->buf_h = buf_h;
+	slot->ahb = ahb;
+	pthread_mutex_unlock(&gpu_lock);
+	return 0;
+}
+
+static bool
+gpu_match_x11_view(struct view *view, uint32_t xid, uint32_t pid, bool xid_only)
+{
+#if HAVE_XWAYLAND
+	struct xwayland_view *xv;
+	struct wlr_xwayland_surface *xs;
+
+	if (view->type != LAB_XWAYLAND_VIEW || !view->mapped) {
+		return false;
+	}
+	xv = (struct xwayland_view *)view;
+	xs = xv->xwayland_surface;
+	if (!xs) {
+		return false;
+	}
+	if (xid && xs->window_id == xid) {
+		return true;
+	}
+	if (!xid_only && pid && (uint32_t)xs->pid == pid) {
+		return true;
+	}
+#else
+	(void)view;
+	(void)xid;
+	(void)pid;
+	(void)xid_only;
+#endif
+	return false;
+}
+
+#if HAVE_XWAYLAND
+static bool
+gpu_match_unmanaged(struct xwayland_unmanaged *u, uint32_t xid, uint32_t pid,
+	bool xid_only)
+{
+	struct wlr_xwayland_surface *xs = u->xwayland_surface;
+
+	if (!xs || !u->node) {
+		return false;
+	}
+	if (xid && xs->window_id == xid) {
+		return true;
+	}
+	if (!xid_only && pid && (uint32_t)xs->pid == pid) {
+		return true;
+	}
+	return false;
+}
+#endif
+
+static bool
+gpu_view_dest(struct view *view, const struct gpu_bind *b,
+	int *x, int *y, int *w, int *h)
+{
+	*x = view->current.x;
+	*y = view->current.y;
+	*w = view->current.width > 0 ? view->current.width : b->buf_w;
+	*h = view->current.height > 0 ? view->current.height : b->buf_h;
+	return *w > 0 && *h > 0;
+}
+
+static bool
+gpu_resolve_bind(const struct gpu_bind *b, int *x, int *y, int *w, int *h)
+{
+	struct view *view;
+
+	if (b->kind == GPU_BIND_SCREEN) {
+		*x = b->x;
+		*y = b->y;
+		*w = b->buf_w;
+		*h = b->buf_h;
+		return *w > 0 && *h > 0;
+	}
+
+	if (b->kind == GPU_BIND_WAYLAND) {
+		wl_list_for_each(view, &server.views, link) {
+			pid_t vpid;
+
+			if (!view->mapped || view->type != LAB_XDG_SHELL_VIEW
+					|| !view->impl || !view->impl->get_pid) {
+				continue;
+			}
+			vpid = view->impl->get_pid(view);
+			if (vpid >= 0 && (uint32_t)vpid == b->pid
+					&& gpu_view_dest(view, b, x, y, w, h)) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	wl_list_for_each(view, &server.views, link) {
+		if (gpu_match_x11_view(view, b->id, b->pid, true)
+				&& gpu_view_dest(view, b, x, y, w, h)) {
+			return true;
+		}
+	}
+#if HAVE_XWAYLAND
+	{
+		struct xwayland_unmanaged *u;
+
+		wl_list_for_each(u, &server.unmanaged_surfaces, link) {
+			if (!gpu_match_unmanaged(u, b->id, b->pid, true)) {
+				continue;
+			}
+			*x = u->xwayland_surface->x;
+			*y = u->xwayland_surface->y;
+			*w = u->xwayland_surface->width > 0
+				? u->xwayland_surface->width : b->buf_w;
+			*h = u->xwayland_surface->height > 0
+				? u->xwayland_surface->height : b->buf_h;
+			return *w > 0 && *h > 0;
+		}
+	}
+#endif
+	wl_list_for_each(view, &server.views, link) {
+		if (gpu_match_x11_view(view, b->id, b->pid, false)
+				&& gpu_view_dest(view, b, x, y, w, h)) {
+			return true;
+		}
+	}
+#if HAVE_XWAYLAND
+	{
+		struct xwayland_unmanaged *u;
+
+		wl_list_for_each(u, &server.unmanaged_surfaces, link) {
+			if (!gpu_match_unmanaged(u, b->id, b->pid, false)) {
+				continue;
+			}
+			*x = u->xwayland_surface->x;
+			*y = u->xwayland_surface->y;
+			*w = u->xwayland_surface->width > 0
+				? u->xwayland_surface->width : b->buf_w;
+			*h = u->xwayland_surface->height > 0
+				? u->xwayland_surface->height : b->buf_h;
+			return *w > 0 && *h > 0;
+		}
+	}
+#endif
+	return false;
+}
+
+void
+gpu_overlay_sync(void)
+{
+	struct wlr_android_ahb_blit slots[GPU_BIND_MAX];
+	struct gpu_bind local[GPU_BIND_MAX];
+	int n = 0;
+	int i;
+	int count = 0;
+
+	if (!server.embed.android) {
+		return;
+	}
+	pthread_mutex_lock(&gpu_lock);
+	n = gpu_n;
+	memcpy(local, gpu_binds, sizeof(local));
+	for (i = 0; i < n; i++) {
+		if (local[i].ahb) {
+			AHardwareBuffer_acquire(local[i].ahb);
+		}
+	}
+	pthread_mutex_unlock(&gpu_lock);
+
+	memset(slots, 0, sizeof(slots));
+	for (i = 0; i < n; i++) {
+		int x = 0, y = 0, w = 0, h = 0;
+
+		if (!local[i].ahb) {
+			continue;
+		}
+		if (gpu_resolve_bind(&local[i], &x, &y, &w, &h)) {
+			slots[count].ahb = local[i].ahb;
+			slots[count].x = x;
+			slots[count].y = y;
+			slots[count].w = w;
+			slots[count].h = h;
+			count++;
+		}
+	}
+	wlr_android_present_ahb_slots(server.embed.android, slots, count);
+	if (count > 0) {
+		static int logged;
+
+		if (!logged) {
+			wlr_log(WLR_INFO, "GPU AHB bound to %d compositor view(s)",
+				count);
+			logged = 1;
+		}
+	}
+	for (i = 0; i < n; i++) {
+		if (local[i].ahb) {
+			AHardwareBuffer_release(local[i].ahb);
+		}
+	}
+}
 
 #ifdef __ANDROID__
 static void
@@ -141,7 +417,26 @@ anlabwc_present_ahb(struct AHardwareBuffer *ahb, int x, int y, int w, int h)
 	if (!ahb || w <= 0 || h <= 0 || !server.embed.android) {
 		return -1;
 	}
-	wlr_android_present_ahb(server.embed.android, ahb, x, y, w, h);
+	if (gpu_bind_store(GPU_BIND_SCREEN, 0, 0, x, y, w, h, ahb) != 0) {
+		return -1;
+	}
+	struct embed_msg msg = { .type = EMBED_REDRAW };
+	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_present_ahb_view(struct AHardwareBuffer *ahb, int kind, uint32_t id,
+	uint32_t pid, int w, int h)
+{
+	if (!ahb || w <= 0 || h <= 0 || !server.embed.android) {
+		return -1;
+	}
+	if (kind != GPU_BIND_X11 && kind != GPU_BIND_WAYLAND) {
+		return -1;
+	}
+	if (gpu_bind_store(kind, id, pid, 0, 0, w, h, ahb) != 0) {
+		return -1;
+	}
 	struct embed_msg msg = { .type = EMBED_REDRAW };
 	return send_msg(&msg);
 }
@@ -362,6 +657,12 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 		close(server.embed.input_wr);
 		server.embed.input_wr = -1;
 	}
+	pthread_mutex_lock(&gpu_lock);
+	for (int i = 0; i < gpu_n; i++) {
+		gpu_bind_release(&gpu_binds[i]);
+	}
+	gpu_n = 0;
+	pthread_mutex_unlock(&gpu_lock);
 	wayland_socket_path[0] = '\0';
 	memset(&server, 0, sizeof(server));
 	server.embed.input_rd = -1;

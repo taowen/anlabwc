@@ -468,6 +468,7 @@ void server_start(void);
 void server_finish(void);
 #if HAVE_ANDROID_EMBED
 int anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data);
+void gpu_overlay_sync(void);
 #endif
 
 void create_constraint(struct wl_listener *listener, void *data);

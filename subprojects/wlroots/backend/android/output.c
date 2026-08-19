@@ -370,12 +370,24 @@ static void draw_ahb(struct wlr_android_backend *backend, int x, int y, int w, i
 	glDisable(GL_BLEND);
 }
 
+static void overlay_release_locked(struct wlr_android_overlay *overlay) {
+	int i;
+
+	for (i = 0; i < overlay->n; i++) {
+		if (overlay->slots[i].ahb) {
+			AHardwareBuffer_release(overlay->slots[i].ahb);
+			overlay->slots[i].ahb = NULL;
+		}
+	}
+	overlay->n = 0;
+}
+
 static void blit_to_window(struct wlr_android_backend *backend,
 		const uint8_t *src, uint32_t src_fmt, size_t src_stride,
 		int buf_w, int buf_h) {
-	AHardwareBuffer *ahb = NULL;
-	int ox = 0, oy = 0, ow = 0, oh = 0;
-	bool overlay = false;
+	struct wlr_android_ahb_slot local[WLR_ANDROID_AHB_MAX];
+	int n = 0;
+	int i;
 	(void)src_fmt;
 
 	if (!gles_init(backend)) {
@@ -394,51 +406,80 @@ static void blit_to_window(struct wlr_android_backend *backend,
 	draw_fullscreen(&backend->gles);
 
 	pthread_mutex_lock(&backend->overlay.lock);
-	if (backend->overlay.ready && backend->overlay.ahb) {
-		ahb = backend->overlay.ahb;
-		AHardwareBuffer_acquire(ahb);
-		ox = backend->overlay.x;
-		oy = backend->overlay.y;
-		ow = backend->overlay.w;
-		oh = backend->overlay.h;
-		overlay = true;
+	n = backend->overlay.n;
+	if (n > WLR_ANDROID_AHB_MAX) {
+		n = WLR_ANDROID_AHB_MAX;
+	}
+	for (i = 0; i < n; i++) {
+		local[i] = backend->overlay.slots[i];
+		if (local[i].ahb) {
+			AHardwareBuffer_acquire(local[i].ahb);
+		}
 	}
 	pthread_mutex_unlock(&backend->overlay.lock);
 
-	if (overlay) {
-		if (bind_ahb(backend, ahb)) {
-			wlr_log(WLR_INFO, "GLES AHB overlay %dx%d at %d,%d", ow, oh, ox, oy);
-			draw_ahb(backend, ox, oy, ow, oh);
+	for (i = 0; i < n; i++) {
+		if (!local[i].ahb) {
+			continue;
 		}
-		AHardwareBuffer_release(ahb);
+		if (bind_ahb(backend, local[i].ahb)) {
+			draw_ahb(backend, local[i].x, local[i].y,
+				local[i].w, local[i].h);
+		}
+		AHardwareBuffer_release(local[i].ahb);
 	}
 	if (!eglSwapBuffers(backend->gles.dpy, backend->gles.surf)) {
 		wlr_log(WLR_ERROR, "eglSwapBuffers failed 0x%x", eglGetError());
 	}
 }
 
-void wlr_android_present_ahb(struct wlr_backend *wlr_backend,
-		struct AHardwareBuffer *ahb, int x, int y, int w, int h) {
+void wlr_android_present_ahb_slots(struct wlr_backend *wlr_backend,
+		const struct wlr_android_ahb_blit *slots, int n) {
 	struct wlr_android_backend *backend;
-	AHardwareBuffer *old;
+	struct wlr_android_ahb_slot next[WLR_ANDROID_AHB_MAX];
+	int count = 0;
+	int i;
 
-	if (!wlr_backend_is_android(wlr_backend) || !ahb || w <= 0 || h <= 0) {
+	if (!wlr_backend_is_android(wlr_backend)) {
 		return;
 	}
 	backend = android_backend_from_backend(wlr_backend);
-	AHardwareBuffer_acquire(ahb);
-	pthread_mutex_lock(&backend->overlay.lock);
-	old = backend->overlay.ahb;
-	backend->overlay.ahb = ahb;
-	backend->overlay.x = x;
-	backend->overlay.y = y;
-	backend->overlay.w = w;
-	backend->overlay.h = h;
-	backend->overlay.ready = true;
-	pthread_mutex_unlock(&backend->overlay.lock);
-	if (old) {
-		AHardwareBuffer_release(old);
+	if (n < 0) {
+		n = 0;
 	}
+	if (n > WLR_ANDROID_AHB_MAX) {
+		n = WLR_ANDROID_AHB_MAX;
+	}
+	memset(next, 0, sizeof(next));
+	for (i = 0; i < n; i++) {
+		if (!slots || !slots[i].ahb || slots[i].w <= 0 || slots[i].h <= 0) {
+			continue;
+		}
+		AHardwareBuffer_acquire(slots[i].ahb);
+		next[count].ahb = slots[i].ahb;
+		next[count].x = slots[i].x;
+		next[count].y = slots[i].y;
+		next[count].w = slots[i].w;
+		next[count].h = slots[i].h;
+		count++;
+	}
+	pthread_mutex_lock(&backend->overlay.lock);
+	overlay_release_locked(&backend->overlay);
+	memcpy(backend->overlay.slots, next, sizeof(next));
+	backend->overlay.n = count;
+	pthread_mutex_unlock(&backend->overlay.lock);
+}
+
+void wlr_android_present_ahb(struct wlr_backend *wlr_backend,
+		struct AHardwareBuffer *ahb, int x, int y, int w, int h) {
+	struct wlr_android_ahb_blit slot = {
+		.ahb = ahb,
+		.x = x,
+		.y = y,
+		.w = w,
+		.h = h,
+	};
+	wlr_android_present_ahb_slots(wlr_backend, &slot, 1);
 }
 
 void wlr_android_schedule_frame(struct wlr_backend *wlr_backend) {
@@ -529,11 +570,7 @@ static void output_destroy(struct wlr_output *wlr_output) {
 
 	gles_fini(backend);
 	pthread_mutex_lock(&backend->overlay.lock);
-	if (backend->overlay.ahb) {
-		AHardwareBuffer_release(backend->overlay.ahb);
-		backend->overlay.ahb = NULL;
-		backend->overlay.ready = false;
-	}
+	overlay_release_locked(&backend->overlay);
 	pthread_mutex_unlock(&backend->overlay.lock);
 	wlr_output_finish(wlr_output);
 	if (backend->frame_timer) {
