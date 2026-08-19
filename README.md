@@ -10,10 +10,11 @@ Build the Android embed library:
 
 ```
 meson setup build --cross-file android-cross.ini \
-  -Dandroid-embed=enabled -Dxwayland=disabled -Dsvg=disabled \
+  -Dandroid-embed=enabled -Dxwayland=enabled -Dsvg=disabled \
   -Dicon=disabled -Dlabnag=disabled -Dnls=disabled \
   -Dwlroots:backends=[] -Dwlroots:session=disabled \
-  -Dwlroots:renderers=[] -Dwlroots:examples=false
+  -Dwlroots:renderers=[] -Dwlroots:xwayland=enabled \
+  -Dwlroots:examples=false
 ```
 
 Public API: `include/anlabwc-embed.h` (`anlabwc_run` on the Activity

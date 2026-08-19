@@ -27,7 +27,7 @@ static void safe_close(int fd) {
 noreturn static void exec_xwayland(struct wlr_xwayland_server *server,
 		int notify_fd) {
 	if (!set_cloexec(server->x_fd[0], false) ||
-			!set_cloexec(server->x_fd[1], false) ||
+			(server->x_fd[1] >= 0 && !set_cloexec(server->x_fd[1], false)) ||
 			!set_cloexec(server->wl_fd[1], false)) {
 		wlr_log(WLR_ERROR, "Failed to unset CLOEXEC on FD");
 		_exit(EXIT_FAILURE);
@@ -63,13 +63,17 @@ noreturn static void exec_xwayland(struct wlr_xwayland_server *server,
 #if HAVE_XWAYLAND_LISTENFD
 	argv[i++] = "-listenfd";
 	argv[i++] = listenfd0;
-	argv[i++] = "-listenfd";
-	argv[i++] = listenfd1;
+	if (server->x_fd[1] >= 0) {
+		argv[i++] = "-listenfd";
+		argv[i++] = listenfd1;
+	}
 #else
 	argv[i++] = "-listen";
 	argv[i++] = listenfd0;
-	argv[i++] = "-listen";
-	argv[i++] = listenfd1;
+	if (server->x_fd[1] >= 0) {
+		argv[i++] = "-listen";
+		argv[i++] = listenfd1;
+	}
 #endif
 	argv[i++] = "-displayfd";
 	argv[i++] = displayfd;
@@ -97,6 +101,18 @@ noreturn static void exec_xwayland(struct wlr_xwayland_server *server,
 	server->options.force_xrandr_emulation = false;
 #endif
 
+#ifdef __ANDROID__
+	{
+		const char *xkbdir = getenv("XKB_CONFIG_ROOT");
+		argv[i++] = "-ac";
+		argv[i++] = "-nokeymap";
+		argv[i++] = "-noreset";
+		if (xkbdir && xkbdir[0]) {
+			argv[i++] = "-xkbdir";
+			argv[i++] = (char *)xkbdir;
+		}
+	}
+#endif
 	argv[i++] = NULL;
 
 	assert(i <= sizeof(argv) / sizeof(argv[0]));
@@ -120,6 +136,25 @@ noreturn static void exec_xwayland(struct wlr_xwayland_server *server,
 	if (verbosity < WLR_ERROR) {
 		dup2(devnull, STDERR_FILENO);
 	}
+#ifdef __ANDROID__
+	{
+		const char *runtime = getenv("XDG_RUNTIME_DIR");
+		if (runtime && runtime[0]) {
+			char logpath[400];
+			int logfd;
+
+			snprintf(logpath, sizeof(logpath), "%s/xwayland.log", runtime);
+			logfd = open(logpath, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+			if (logfd >= 0) {
+				dup2(logfd, STDOUT_FILENO);
+				dup2(logfd, STDERR_FILENO);
+				if (logfd > STDERR_FILENO) {
+					close(logfd);
+				}
+			}
+		}
+	}
+#endif
 
 	const char *xwayland_path = getenv("WLR_XWAYLAND");
 	if (xwayland_path) {
@@ -144,9 +179,11 @@ static void server_finish_process(struct wlr_xwayland_server *server) {
 
 	if (server->x_fd_read_event[0]) {
 		wl_event_source_remove(server->x_fd_read_event[0]);
+		server->x_fd_read_event[0] = NULL;
+	}
+	if (server->x_fd_read_event[1]) {
 		wl_event_source_remove(server->x_fd_read_event[1]);
-
-		server->x_fd_read_event[0] = server->x_fd_read_event[1] = NULL;
+		server->x_fd_read_event[1] = NULL;
 	}
 
 	if (server->client) {
@@ -413,8 +450,10 @@ static bool server_start(struct wlr_xwayland_server *server) {
 static int xwayland_socket_connected(int fd, uint32_t mask, void *data) {
 	struct wlr_xwayland_server *server = data;
 
-	wl_event_source_remove(server->x_fd_read_event[0]);
-	wl_event_source_remove(server->x_fd_read_event[1]);
+	if (server->x_fd_read_event[0])
+		wl_event_source_remove(server->x_fd_read_event[0]);
+	if (server->x_fd_read_event[1])
+		wl_event_source_remove(server->x_fd_read_event[1]);
 	server->x_fd_read_event[0] = server->x_fd_read_event[1] = NULL;
 
 	server_start(server);
@@ -430,11 +469,13 @@ static bool server_start_lazy(struct wlr_xwayland_server *server) {
 		return false;
 	}
 
-	if (!(server->x_fd_read_event[1] = wl_event_loop_add_fd(loop, server->x_fd[1],
-				WL_EVENT_READABLE, xwayland_socket_connected, server))) {
-		wl_event_source_remove(server->x_fd_read_event[0]);
-		server->x_fd_read_event[0] = NULL;
-		return false;
+	if (server->x_fd[1] >= 0) {
+		if (!(server->x_fd_read_event[1] = wl_event_loop_add_fd(loop, server->x_fd[1],
+					WL_EVENT_READABLE, xwayland_socket_connected, server))) {
+			wl_event_source_remove(server->x_fd_read_event[0]);
+			server->x_fd_read_event[0] = NULL;
+			return false;
+		}
 	}
 
 	return true;
