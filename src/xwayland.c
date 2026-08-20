@@ -198,6 +198,32 @@ top_parent_of(struct view *view)
 }
 
 static bool
+xwayland_is_popup_type(struct wlr_xwayland_surface *surface)
+{
+	static const enum wlr_xwayland_net_wm_window_type skip[] = {
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_MENU,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DROPDOWN_MENU,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_POPUP_MENU,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLTIP,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_NOTIFICATION,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_COMBO,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DND,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_SPLASH,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DOCK,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_DESKTOP,
+		WLR_XWAYLAND_NET_WM_WINDOW_TYPE_TOOLBAR,
+	};
+	size_t i;
+
+	for (i = 0; i < ARRAY_SIZE(skip); i++) {
+		if (wlr_xwayland_surface_has_window_type(surface, skip[i])) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool
 want_deco(struct wlr_xwayland_surface *xwayland_surface)
 {
 	struct view *view = (struct view *)xwayland_surface->data;
@@ -212,8 +238,21 @@ want_deco(struct wlr_xwayland_surface *xwayland_surface)
 		break;
 	}
 
+#if HAVE_ANDROID_EMBED
+	/*
+	 * Qt/WPS sets Motif decorations=0 and draws CSD. Embed rc.xml
+	 * already asks for <decoration>server</decoration> because the
+	 * labwc titlebar is how you drag and close on a phone. Honor
+	 * that for X11 toplevels too; menus/tooltips stay undecorated.
+	 */
+	if (xwayland_is_popup_type(xwayland_surface)) {
+		return false;
+	}
+	return true;
+#else
 	return xwayland_surface->decorations ==
 		WLR_XWAYLAND_SURFACE_DECORATIONS_ALL;
+#endif
 }
 
 /*
