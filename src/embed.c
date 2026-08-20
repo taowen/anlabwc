@@ -131,6 +131,41 @@ gpu_bind_store(int kind, uint32_t id, uint32_t pid, int x, int y,
 	return 0;
 }
 
+#if HAVE_XWAYLAND
+static bool
+gpu_xsurface_has_xid(struct wlr_xwayland_surface *xs, uint32_t xid)
+{
+	struct wlr_xwayland_surface *child;
+
+	if (!xs || !xid) {
+		return false;
+	}
+	if (xs->window_id == xid) {
+		return true;
+	}
+	wl_list_for_each(child, &xs->children, parent_link) {
+		if (gpu_xsurface_has_xid(child, xid)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+static bool
+gpu_xs_dest(struct wlr_xwayland_surface *xs, const struct gpu_bind *b,
+	int *x, int *y, int *w, int *h)
+{
+	if (!xs) {
+		return false;
+	}
+	*x = xs->x;
+	*y = xs->y;
+	*w = xs->width > 0 ? (int)xs->width : b->buf_w;
+	*h = xs->height > 0 ? (int)xs->height : b->buf_h;
+	return *w > 0 && *h > 0;
+}
+#endif
+
 static bool
 gpu_match_x11_view(struct view *view, uint32_t xid, uint32_t pid, bool xid_only)
 {
@@ -138,7 +173,7 @@ gpu_match_x11_view(struct view *view, uint32_t xid, uint32_t pid, bool xid_only)
 	struct xwayland_view *xv;
 	struct wlr_xwayland_surface *xs;
 
-	if (view->type != LAB_XWAYLAND_VIEW || !view->mapped) {
+	if (view->type != LAB_XWAYLAND_VIEW) {
 		return false;
 	}
 	xv = (struct xwayland_view *)view;
@@ -146,7 +181,7 @@ gpu_match_x11_view(struct view *view, uint32_t xid, uint32_t pid, bool xid_only)
 	if (!xs) {
 		return false;
 	}
-	if (xid && xs->window_id == xid) {
+	if (gpu_xsurface_has_xid(xs, xid)) {
 		return true;
 	}
 	if (!xid_only && pid && (uint32_t)xs->pid == pid) {
@@ -168,10 +203,10 @@ gpu_match_unmanaged(struct xwayland_unmanaged *u, uint32_t xid, uint32_t pid,
 {
 	struct wlr_xwayland_surface *xs = u->xwayland_surface;
 
-	if (!xs || !u->node) {
+	if (!xs) {
 		return false;
 	}
-	if (xid && xs->window_id == xid) {
+	if (gpu_xsurface_has_xid(xs, xid)) {
 		return true;
 	}
 	if (!xid_only && pid && (uint32_t)xs->pid == pid) {
@@ -185,10 +220,33 @@ static bool
 gpu_view_dest(struct view *view, const struct gpu_bind *b,
 	int *x, int *y, int *w, int *h)
 {
+	if (view->mapped && view->current.width > 0 && view->current.height > 0) {
+		*x = view->current.x;
+		*y = view->current.y;
+		*w = view->current.width;
+		*h = view->current.height;
+		return true;
+	}
+#if HAVE_XWAYLAND
+	if (view->type == LAB_XWAYLAND_VIEW) {
+		struct xwayland_view *xv = (struct xwayland_view *)view;
+
+		if (gpu_xs_dest(xv->xwayland_surface, b, x, y, w, h)) {
+			return true;
+		}
+	}
+#endif
+	if (view->pending.width > 0 && view->pending.height > 0) {
+		*x = view->pending.x;
+		*y = view->pending.y;
+		*w = view->pending.width;
+		*h = view->pending.height;
+		return true;
+	}
 	*x = view->current.x;
 	*y = view->current.y;
-	*w = view->current.width > 0 ? view->current.width : b->buf_w;
-	*h = view->current.height > 0 ? view->current.height : b->buf_h;
+	*w = b->buf_w;
+	*h = b->buf_h;
 	return *w > 0 && *h > 0;
 }
 
@@ -319,6 +377,16 @@ gpu_overlay_sync(void)
 			wlr_log(WLR_INFO, "GPU AHB bound to %d compositor view(s)",
 				count);
 			logged = 1;
+		}
+	} else if (n > 0) {
+		static int miss_logged;
+
+		if (miss_logged < 4) {
+			wlr_log(WLR_ERROR,
+				"GPU AHB unresolved kind=%d id=%u pid=%u %dx%d",
+				local[0].kind, local[0].id, local[0].pid,
+				local[0].buf_w, local[0].buf_h);
+			miss_logged++;
 		}
 	}
 	for (i = 0; i < n; i++) {
