@@ -116,11 +116,25 @@ static GLuint link_program(const char *vs, const char *fs) {
 }
 
 static void gles_destroy_image(struct wlr_android_gles *g) {
+	int i;
+
 	if (g->image != EGL_NO_IMAGE_KHR && g->dpy != EGL_NO_DISPLAY) {
 		eglDestroyImageKHR(g->dpy, g->image);
 		g->image = EGL_NO_IMAGE_KHR;
 	}
 	g->image_ahb = NULL;
+	for (i = 0; i < g->ahb_cache_used; i++) {
+		if (g->ahb_cache[i].image != EGL_NO_IMAGE_KHR && g->dpy != EGL_NO_DISPLAY)
+			eglDestroyImageKHR(g->dpy, g->ahb_cache[i].image);
+		if (g->ahb_cache[i].tex)
+			glDeleteTextures(1, &g->ahb_cache[i].tex);
+		g->ahb_cache[i].image = EGL_NO_IMAGE_KHR;
+		g->ahb_cache[i].tex = 0;
+		g->ahb_cache[i].ahb = NULL;
+	}
+	g->ahb_cache_used = 0;
+	g->ahb_cache_clock = 0;
+	g->tex_ahb = 0;
 }
 
 static void gles_fini(struct wlr_android_backend *backend) {
@@ -253,17 +267,11 @@ static bool gles_init(struct wlr_android_backend *backend) {
 	g->a_ahb_pos = glGetAttribLocation(g->prog_ahb, "a_pos");
 	g->a_ahb_uv = glGetAttribLocation(g->prog_ahb, "a_uv");
 	glGenTextures(1, &g->tex_comp);
-	glGenTextures(1, &g->tex_ahb);
 	glBindTexture(GL_TEXTURE_2D, g->tex_comp);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-	glBindTexture(GL_TEXTURE_EXTERNAL_OES, g->tex_ahb);
-	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-	glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 	g->ok = true;
 	wlr_log(WLR_INFO, "Android GLES scanout ready");
 	return true;
@@ -308,29 +316,60 @@ static bool bind_ahb(struct wlr_android_backend *backend, AHardwareBuffer *ahb) 
 	struct wlr_android_gles *g = &backend->gles;
 	EGLClientBuffer client;
 	const EGLint attribs[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+	struct wlr_android_gles_ahb *slot = NULL;
+	int i;
 
-	if (g->image_ahb == ahb && g->image != EGL_NO_IMAGE_KHR) {
-		return true;
+	for (i = 0; i < g->ahb_cache_used; i++) {
+		if (g->ahb_cache[i].ahb == ahb && g->ahb_cache[i].image != EGL_NO_IMAGE_KHR) {
+			g->tex_ahb = g->ahb_cache[i].tex;
+			g->image = g->ahb_cache[i].image;
+			g->image_ahb = ahb;
+			return true;
+		}
 	}
-	gles_destroy_image(g);
+	if (g->ahb_cache_used < GLES_AHB_CACHE) {
+		slot = &g->ahb_cache[g->ahb_cache_used++];
+		memset(slot, 0, sizeof(*slot));
+		slot->image = EGL_NO_IMAGE_KHR;
+	} else {
+		slot = &g->ahb_cache[g->ahb_cache_clock % GLES_AHB_CACHE];
+		g->ahb_cache_clock++;
+		glFinish();
+		if (slot->image != EGL_NO_IMAGE_KHR)
+			eglDestroyImageKHR(g->dpy, slot->image);
+		slot->image = EGL_NO_IMAGE_KHR;
+		slot->ahb = NULL;
+	}
 	client = eglGetNativeClientBufferANDROID(ahb);
 	if (!client) {
 		wlr_log(WLR_ERROR, "eglGetNativeClientBufferANDROID failed");
 		return false;
 	}
-	g->image = eglCreateImageKHR(g->dpy, EGL_NO_CONTEXT,
+	slot->image = eglCreateImageKHR(g->dpy, EGL_NO_CONTEXT,
 		EGL_NATIVE_BUFFER_ANDROID, client, attribs);
-	if (g->image == EGL_NO_IMAGE_KHR) {
+	if (slot->image == EGL_NO_IMAGE_KHR) {
 		wlr_log(WLR_ERROR, "eglCreateImageKHR AHB failed 0x%x", eglGetError());
 		return false;
 	}
-	glBindTexture(GL_TEXTURE_EXTERNAL_OES, g->tex_ahb);
-	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, g->image);
+	if (!slot->tex) {
+		glGenTextures(1, &slot->tex);
+		glBindTexture(GL_TEXTURE_EXTERNAL_OES, slot->tex);
+		glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_EXTERNAL_OES, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	}
+	glBindTexture(GL_TEXTURE_EXTERNAL_OES, slot->tex);
+	glEGLImageTargetTexture2DOES(GL_TEXTURE_EXTERNAL_OES, slot->image);
 	if (glGetError() != GL_NO_ERROR) {
 		wlr_log(WLR_ERROR, "glEGLImageTargetTexture2DOES failed");
-		gles_destroy_image(g);
+		eglDestroyImageKHR(g->dpy, slot->image);
+		slot->image = EGL_NO_IMAGE_KHR;
 		return false;
 	}
+	slot->ahb = ahb;
+	g->tex_ahb = slot->tex;
+	g->image = slot->image;
 	g->image_ahb = ahb;
 	return true;
 }

@@ -15,6 +15,7 @@
 #define ANDROID_DEFAULT_REFRESH (60 * 1000)
 
 #define WLR_ANDROID_AHB_MAX 8
+#define GLES_AHB_CACHE 4
 
 struct wlr_android_ahb_slot {
 	AHardwareBuffer *ahb;
@@ -28,6 +29,12 @@ struct wlr_android_overlay {
 	pthread_mutex_t lock;
 	struct wlr_android_ahb_slot slots[WLR_ANDROID_AHB_MAX];
 	int n;
+};
+
+struct wlr_android_gles_ahb {
+	AHardwareBuffer *ahb;
+	EGLImageKHR image;
+	GLuint tex;
 };
 
 struct wlr_android_gles {
@@ -46,6 +53,9 @@ struct wlr_android_gles {
 	GLint a_ahb_uv;
 	EGLImageKHR image;
 	AHardwareBuffer *image_ahb;
+	struct wlr_android_gles_ahb ahb_cache[GLES_AHB_CACHE];
+	int ahb_cache_used;
+	int ahb_cache_clock;
 	int tex_w;
 	int tex_h;
 };
