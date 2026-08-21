@@ -22,6 +22,7 @@
 
 #if HAVE_XWAYLAND
 #include <wlr/xwayland.h>
+#include "xwayland.h"
 #endif
 
 void
@@ -320,9 +321,117 @@ avoid_edge_rounding_issues(struct cursor_context *ctx)
 	}
 }
 
+/*
+ * AHB overlay presents pixels without a wl_buffer, so the Xwayland
+ * scene node stays 0x0 / unmapped and wlr_scene_node_at misses it.
+ * Hit-test the same box gpu_view_dest uses for the blit.
+ */
+static bool
+view_input_box(struct view *view, struct wlr_box *box)
+{
+	if (!view->surface) {
+		return false;
+	}
+	*box = view->current;
+	if (wlr_box_empty(box)) {
+		*box = view->pending;
+	}
+#if HAVE_XWAYLAND
+	if (wlr_box_empty(box) && view->type == LAB_XWAYLAND_VIEW) {
+		struct xwayland_view *xv = (struct xwayland_view *)view;
+		struct wlr_xwayland_surface *xs = xv->xwayland_surface;
+
+		if (xs && xs->width > 0 && xs->height > 0) {
+			box->x = xs->x;
+			box->y = xs->y;
+			box->width = xs->width;
+			box->height = xs->height;
+		}
+	}
+#endif
+	if (wlr_box_empty(box) && view->fullscreen
+			&& output_is_usable(view->output)) {
+		*box = output_usable_area_in_layout_coords(view->output);
+	}
+	return !wlr_box_empty(box);
+}
+
+static void
+cursor_context_overlay_fallback(struct cursor_context *ret)
+{
+	struct wlr_cursor *cursor = server.seat.cursor;
+	double lx = cursor->x;
+	double ly = cursor->y;
+
+	if (ret->type == LAB_NODE_CLIENT
+			|| ret->type == LAB_NODE_UNMANAGED
+			|| ret->type == LAB_NODE_LAYER_SURFACE
+			|| ret->type == LAB_NODE_MENUITEM
+			|| ret->type == LAB_NODE_CYCLE_OSD_ITEM) {
+		return;
+	}
+
+#if HAVE_XWAYLAND
+	struct xwayland_unmanaged *unmanaged;
+	wl_list_for_each(unmanaged, &server.unmanaged_surfaces, link) {
+		struct wlr_xwayland_surface *xs = unmanaged->xwayland_surface;
+		int w, h;
+
+		if (!xs || !xs->surface) {
+			continue;
+		}
+		w = xs->width;
+		h = xs->height;
+		if (w <= 0 || h <= 0) {
+			continue;
+		}
+		if (lx < xs->x || ly < xs->y
+				|| lx >= xs->x + w || ly >= xs->y + h) {
+			continue;
+		}
+		ret->surface = xs->surface;
+		ret->sx = lx - xs->x;
+		ret->sy = ly - xs->y;
+		ret->type = LAB_NODE_UNMANAGED;
+		wlr_log(WLR_INFO,
+			"cursor overlay unmanaged %.0f,%.0f surf=%dx%d",
+			ret->sx, ret->sy, xs->surface->current.width,
+			xs->surface->current.height);
+		return;
+	}
+#endif
+
+	struct view *view;
+
+	wl_list_for_each(view, &server.views, link) {
+		struct wlr_box box;
+
+		if (!view_input_box(view, &box)) {
+			continue;
+		}
+		if (lx < box.x || ly < box.y
+				|| lx >= box.x + box.width
+				|| ly >= box.y + box.height) {
+			continue;
+		}
+		ret->view = view;
+		ret->surface = view->surface;
+		ret->sx = lx - box.x;
+		ret->sy = ly - box.y;
+		ret->type = LAB_NODE_CLIENT;
+		wlr_log(WLR_INFO,
+			"cursor overlay view mapped=%d %.0f,%.0f box=%d,%d %dx%d surf=%dx%d",
+			view->mapped, ret->sx, ret->sy, box.x, box.y,
+			box.width, box.height,
+			view->surface->current.width,
+			view->surface->current.height);
+		return;
+	}
+}
+
 /* TODO: make this less big and scary */
-struct cursor_context
-get_cursor_context(void)
+static struct cursor_context
+get_cursor_context_scene(void)
 {
 	struct cursor_context ret = {.type = LAB_NODE_NONE};
 	struct wlr_cursor *cursor = server.seat.cursor;
@@ -442,6 +551,14 @@ get_cursor_context(void)
 	 * TODO: add node descriptors for the OSDs and reinstate
 	 *       wlr_log(WLR_DEBUG, "Unknown node detected");
 	 */
+	return ret;
+}
+
+struct cursor_context
+get_cursor_context(void)
+{
+	struct cursor_context ret = get_cursor_context_scene();
+	cursor_context_overlay_fallback(&ret);
 	return ret;
 }
 

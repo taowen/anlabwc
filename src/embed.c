@@ -430,6 +430,9 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 	if (n != (ssize_t)sizeof(msg) || !server.embed.android) {
 		return 0;
 	}
+	if (msg.type == EMBED_PTR_BUTTON || msg.type == EMBED_KEY)
+		wlr_log(WLR_INFO, "embed input type=%u xy=%.1f,%.1f btn=%u press=%d",
+			msg.type, msg.x, msg.y, msg.button, msg.pressed);
 	switch (msg.type) {
 	case EMBED_PTR_MOTION:
 		wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);

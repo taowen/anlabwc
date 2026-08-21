@@ -642,6 +642,8 @@ bool android_output_init(struct wlr_android_backend *backend) {
 
 	wlr_output_set_name(&backend->output, "ANLABWC-1");
 	wlr_output_set_description(&backend->output, "Android ANativeWindow GLES");
+	free(backend->pointer.output_name);
+	backend->pointer.output_name = strdup("ANLABWC-1");
 
 	backend->frame_timer = wl_event_loop_add_timer(backend->event_loop,
 		signal_frame, backend);

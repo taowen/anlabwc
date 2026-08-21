@@ -986,6 +986,8 @@ handle_motion_absolute(struct wl_listener *listener, void *data)
 
 	double dx = lx - seat->cursor->x;
 	double dy = ly - seat->cursor->y;
+	wlr_log(WLR_INFO, "abs pointer norm=%.4f,%.4f layout=%.1f,%.1f cursor=%.1f,%.1f d=%.1f,%.1f",
+		event->x, event->y, lx, ly, seat->cursor->x, seat->cursor->y, dx, dy);
 
 	preprocess_cursor_motion(seat, event->pointer,
 		event->time_msec, dx, dy);
@@ -1144,6 +1146,30 @@ cursor_process_button_press(struct seat *seat, uint32_t button, uint32_t time_ms
 	/* Used on next button release to check if it can close menu or select menu item */
 	press_msec = time_msec;
 
+	{
+		int nview = 0;
+		struct view *v;
+
+		wl_list_for_each(v, &server.views, link) {
+			nview++;
+			if (nview <= 4) {
+				wlr_log(WLR_INFO,
+					"view#%d mapped=%d fs=%d box=%d,%d %dx%d surf=%p %dx%d",
+					nview, v->mapped, v->fullscreen,
+					v->current.x, v->current.y,
+					v->current.width, v->current.height,
+					(void *)v->surface,
+					v->surface ? v->surface->current.width : 0,
+					v->surface ? v->surface->current.height : 0);
+			}
+		}
+		wlr_log(WLR_INFO,
+			"button press ctx type=%d views=%d surf=%p %dx%d sx=%.1f,%.1f",
+			ctx.type, nview, (void *)ctx.surface,
+			ctx.surface ? ctx.surface->current.width : 0,
+			ctx.surface ? ctx.surface->current.height : 0,
+			ctx.sx, ctx.sy);
+	}
 	if (ctx.view || ctx.surface) {
 		/* Store cursor context for later action processing */
 		cursor_context_save(&seat->pressed, &ctx);
@@ -1300,6 +1326,8 @@ handle_button(struct wl_listener *listener, void *data)
 	case WL_POINTER_BUTTON_STATE_PRESSED:
 		notify = cursor_process_button_press(seat, event->button,
 			event->time_msec);
+		wlr_log(WLR_INFO, "button notify=%d focused=%p",
+			notify, (void *)seat->wlr_seat->pointer_state.focused_surface);
 		if (notify) {
 			wlr_seat_pointer_notify_button(seat->wlr_seat, event->time_msec,
 				event->button, event->state);

@@ -226,6 +226,13 @@ xwayland_is_popup_type(struct wlr_xwayland_surface *surface)
 static bool
 want_deco(struct wlr_xwayland_surface *xwayland_surface)
 {
+#if HAVE_ANDROID_EMBED
+	/*
+	 * AHB is the guest's full pixmap. SSD insets view->current and
+	 * clips the blit (timeline / tools fall off the output).
+	 */
+	return false;
+#else
 	struct view *view = (struct view *)xwayland_surface->data;
 
 	/* Window-rules take priority if they exist for this view */
@@ -238,18 +245,9 @@ want_deco(struct wlr_xwayland_surface *xwayland_surface)
 		break;
 	}
 
-#if HAVE_ANDROID_EMBED
-	/*
-	 * Qt/WPS sets Motif decorations=0 and draws CSD. Embed rc.xml
-	 * already asks for <decoration>server</decoration> because the
-	 * labwc titlebar is how you drag and close on a phone. Honor
-	 * that for X11 toplevels too; menus/tooltips stay undecorated.
-	 */
 	if (xwayland_is_popup_type(xwayland_surface)) {
 		return false;
 	}
-	return true;
-#else
 	return xwayland_surface->decorations ==
 		WLR_XWAYLAND_SURFACE_DECORATIONS_ALL;
 #endif
@@ -431,6 +429,34 @@ handle_associate(struct wl_listener *listener, void *data)
 	if (window_rules_get_property(view, "allowAlwaysOnTop") == LAB_PROP_TRUE) {
 		view_set_layer(view, xsurface->above
 		? VIEW_LAYER_ALWAYS_ON_TOP : VIEW_LAYER_NORMAL);
+	}
+
+	/*
+	 * Vortek/Gladio blit an AHB and never commit a wl_buffer, so
+	 * handle_map never runs. Keep current/pending in sync so input
+	 * and the overlay dest share one box.
+	 */
+	if (!view->mapped && view->surface) {
+		if (wlr_box_empty(&view->current)
+				&& !wlr_box_empty(&view->pending)) {
+			view->current = view->pending;
+		}
+		if (wlr_box_empty(&view->current)
+				&& xsurface->width > 0 && xsurface->height > 0) {
+			view->current.x = xsurface->x;
+			view->current.y = xsurface->y;
+			view->current.width = xsurface->width;
+			view->current.height = xsurface->height;
+		}
+		if (!wlr_box_empty(&view->current)) {
+			wlr_scene_node_set_enabled(&view->scene_tree->node, true);
+		}
+		wlr_log(WLR_INFO,
+			"xwayland overlay-ready mapped=0 box=%d,%d %dx%d surf=%dx%d",
+			view->current.x, view->current.y,
+			view->current.width, view->current.height,
+			view->surface->current.width,
+			view->surface->current.height);
 	}
 }
 
