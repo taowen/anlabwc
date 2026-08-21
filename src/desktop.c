@@ -137,14 +137,7 @@ desktop_focus_view_internal(struct view *view, bool raise, bool allow_delay)
 	}
 
 	if (!view->mapped) {
-#if HAVE_ANDROID_EMBED
-		/* Vortek/Gladio AHB views never map; they still take seat focus. */
-		if (!view->surface) {
-			return;
-		}
-#else
 		return;
-#endif
 	}
 
 	/*
@@ -330,7 +323,7 @@ avoid_edge_rounding_issues(struct cursor_context *ctx)
 
 /*
  * AHB overlay presents pixels without a wl_buffer, so the Xwayland
- * scene node stays 0x0 / unmapped and wlr_scene_node_at misses it.
+ * scene node stays 0x0 and wlr_scene_node_at misses the client area.
  * Hit-test the same box gpu_view_dest uses for the blit.
  */
 static bool
@@ -339,9 +332,12 @@ view_input_box(struct view *view, struct wlr_box *box)
 	if (!view->surface) {
 		return false;
 	}
+	*box = view->current;
+	if (wlr_box_empty(box)) {
+		*box = view->pending;
+	}
 #if HAVE_XWAYLAND
-	/* Unmapped AHB views: prefer the X11 box the blit uses. */
-	if (!view->mapped && view->type == LAB_XWAYLAND_VIEW) {
+	if (wlr_box_empty(box) && view->type == LAB_XWAYLAND_VIEW) {
 		struct xwayland_view *xv = (struct xwayland_view *)view;
 		struct wlr_xwayland_surface *xs = xv->xwayland_surface;
 
@@ -350,14 +346,9 @@ view_input_box(struct view *view, struct wlr_box *box)
 			box->y = xs->y;
 			box->width = xs->width;
 			box->height = xs->height;
-			return true;
 		}
 	}
 #endif
-	*box = view->current;
-	if (wlr_box_empty(box)) {
-		*box = view->pending;
-	}
 	if (wlr_box_empty(box) && view->fullscreen
 			&& output_is_usable(view->output)) {
 		*box = output_usable_area_in_layout_coords(view->output);
@@ -372,7 +363,7 @@ cursor_context_overlay_fallback(struct cursor_context *ret)
 	double lx = cursor->x;
 	double ly = cursor->y;
 
-	/* Only fill AHB holes. Do not steal xterm SSD / client hits. */
+	/* Only fill AHB holes. Do not steal SSD / client hits. */
 	if (ret->type != LAB_NODE_NONE && ret->type != LAB_NODE_ROOT) {
 		return;
 	}

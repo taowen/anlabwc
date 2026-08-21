@@ -31,6 +31,7 @@ static void handle_map(struct wl_listener *listener, void *data);
 static void handle_unmap(struct wl_listener *listener, void *data);
 #if HAVE_ANDROID_EMBED
 static void embed_uncover_ssd(struct view *view);
+static void xwayland_map_overlay_if_needed(struct view *view);
 #endif
 
 static struct xwayland_view *
@@ -342,6 +343,15 @@ handle_commit(struct wl_listener *listener, void *data)
 	 * reducing visual glitches.
 	 */
 	if (current->width != state->width || current->height != state->height) {
+#if HAVE_ANDROID_EMBED
+		/*
+		 * AHB presents never commit a wl_buffer. A 0x0 surface
+		 * commit must not collapse the X11 box that SSD uses.
+		 */
+		if (state->width == 0 || state->height == 0) {
+			return;
+		}
+#endif
 		view_impl_apply_geometry(view, state->width, state->height);
 		view_moved(view);
 	}
@@ -435,36 +445,9 @@ handle_associate(struct wl_listener *listener, void *data)
 		? VIEW_LAYER_ALWAYS_ON_TOP : VIEW_LAYER_NORMAL);
 	}
 
-	/*
-	 * Vortek/Gladio blit an AHB and never commit a wl_buffer, so
-	 * handle_map never runs. Keep current/pending in sync so input
-	 * and the overlay dest share one box.
-	 */
-	if (!view->mapped && view->surface) {
-		if (wlr_box_empty(&view->current)
-				&& !wlr_box_empty(&view->pending)) {
-			view->current = view->pending;
-		}
-		if (wlr_box_empty(&view->current)
-				&& xsurface->width > 0 && xsurface->height > 0) {
-			view->current.x = xsurface->x;
-			view->current.y = xsurface->y;
-			view->current.width = xsurface->width;
-			view->current.height = xsurface->height;
-		}
-		if (!wlr_box_empty(&view->current)) {
-			wlr_scene_node_set_enabled(&view->scene_tree->node, true);
-		}
 #if HAVE_ANDROID_EMBED
-		embed_uncover_ssd(view);
+	xwayland_map_overlay_if_needed(view);
 #endif
-		wlr_log(WLR_INFO,
-			"xwayland overlay-ready mapped=0 box=%d,%d %dx%d surf=%dx%d",
-			view->current.x, view->current.y,
-			view->current.width, view->current.height,
-			view->surface->current.width,
-			view->surface->current.height);
-	}
 }
 
 static void
@@ -539,7 +522,8 @@ xwayland_view_configure(struct view *view, struct wlr_box geo)
 		view->current.y = geo.y;
 		view_moved(view);
 #if HAVE_ANDROID_EMBED
-	} else if (!view->mapped) {
+	} else if (!view->surface || view->surface->current.width == 0
+			|| view->surface->current.height == 0) {
 		/*
 		 * AHB overlays never commit a wl_buffer, so the
 		 * commit-driven current update never runs.
@@ -548,13 +532,15 @@ xwayland_view_configure(struct view *view, struct wlr_box geo)
 		view_moved(view);
 #endif
 	}
+#if HAVE_ANDROID_EMBED
+	xwayland_map_overlay_if_needed(view);
+#endif
 }
 
 #if HAVE_ANDROID_EMBED
 /*
- * SSD is drawn above view->current. Unmapped AHB views never go
- * through map/placement, so a client at y=16 hides the titlebar
- * off the top of the output. Push the client down.
+ * SSD is drawn above view->current. AHB views skip wl_buffer map, so a
+ * client at y=16 hides the titlebar off the top of the output.
  */
 static void
 embed_uncover_ssd(struct view *view)
@@ -562,8 +548,11 @@ embed_uncover_ssd(struct view *view)
 	struct border margin;
 	struct wlr_box geo;
 
-	if (view->mapped || view->fullscreen
-			|| view->ssd_mode == LAB_SSD_MODE_NONE) {
+	if (view->fullscreen || view->ssd_mode == LAB_SSD_MODE_NONE) {
+		return;
+	}
+	if (view->surface && view->surface->current.width > 0
+			&& view->surface->current.height > 0) {
 		return;
 	}
 	margin = ssd_thickness(view);
@@ -579,6 +568,36 @@ embed_uncover_ssd(struct view *view)
 	}
 	geo.y = margin.top;
 	xwayland_view_configure(view, geo);
+}
+
+/*
+ * AHB presents skip wl_buffer, so wlroots never maps the surface.
+ * Drive the same map path with X11 geometry so labwc SSD Close/Move
+ * work like a normal window.
+ */
+static void
+xwayland_map_overlay_if_needed(struct view *view)
+{
+	if (view->mapped || !view->surface) {
+		return;
+	}
+	if (wlr_box_empty(&view->pending)) {
+		if (wlr_box_empty(&view->current)) {
+			return;
+		}
+		view->pending = view->current;
+	}
+	embed_uncover_ssd(view);
+	if (view->mapped) {
+		return;
+	}
+	handle_map(&view->mappable.map, NULL);
+	wlr_log(WLR_INFO,
+		"xwayland overlay map box=%d,%d %dx%d surf=%dx%d",
+		view->current.x, view->current.y,
+		view->current.width, view->current.height,
+		view->surface->current.width,
+		view->surface->current.height);
 }
 #endif
 
