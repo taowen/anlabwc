@@ -220,7 +220,7 @@ static bool
 gpu_view_dest(struct view *view, const struct gpu_bind *b,
 	int *x, int *y, int *w, int *h)
 {
-	if (view->mapped && view->current.width > 0 && view->current.height > 0) {
+	if (view->current.width > 0 && view->current.height > 0) {
 		*x = view->current.x;
 		*y = view->current.y;
 		*w = view->current.width;
@@ -608,6 +608,12 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 		snprintf(xkb, sizeof(xkb), "xkb");
 	}
 	setenv("XKB_CONFIG_ROOT", xkb, 1);
+	{
+		char xkm[600];
+
+		snprintf(xkm, sizeof(xkm), "%s/compiled/ardesk-default.xkm", xkb);
+		setenv("ARDESK_XKM", xkm, 1);
+	}
 
 	char cache[600];
 	snprintf(cache, sizeof(cache), "%s/cache", runtime_dir);

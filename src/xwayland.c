@@ -20,6 +20,7 @@
 #include "labwc.h"
 #include "node.h"
 #include "output.h"
+#include "ssd.h"
 #include "view.h"
 #include "view-impl-common.h"
 #include "window-rules.h"
@@ -28,6 +29,9 @@
 static void set_surface(struct view *view, struct wlr_surface *surface);
 static void handle_map(struct wl_listener *listener, void *data);
 static void handle_unmap(struct wl_listener *listener, void *data);
+#if HAVE_ANDROID_EMBED
+static void embed_uncover_ssd(struct view *view);
+#endif
 
 static struct xwayland_view *
 xwayland_view_from_view(struct view *view)
@@ -226,13 +230,6 @@ xwayland_is_popup_type(struct wlr_xwayland_surface *surface)
 static bool
 want_deco(struct wlr_xwayland_surface *xwayland_surface)
 {
-#if HAVE_ANDROID_EMBED
-	/*
-	 * AHB is the guest's full pixmap. SSD insets view->current and
-	 * clips the blit (timeline / tools fall off the output).
-	 */
-	return false;
-#else
 	struct view *view = (struct view *)xwayland_surface->data;
 
 	/* Window-rules take priority if they exist for this view */
@@ -248,6 +245,13 @@ want_deco(struct wlr_xwayland_surface *xwayland_surface)
 	if (xwayland_is_popup_type(xwayland_surface)) {
 		return false;
 	}
+#if HAVE_ANDROID_EMBED
+	/*
+	 * rc.xml is decoration=server. Blender's Motif hints skip SSD;
+	 * dest stays on view->current so the AHB is not clipped.
+	 */
+	return true;
+#else
 	return xwayland_surface->decorations ==
 		WLR_XWAYLAND_SURFACE_DECORATIONS_ALL;
 #endif
@@ -451,6 +455,9 @@ handle_associate(struct wl_listener *listener, void *data)
 		if (!wlr_box_empty(&view->current)) {
 			wlr_scene_node_set_enabled(&view->scene_tree->node, true);
 		}
+#if HAVE_ANDROID_EMBED
+		embed_uncover_ssd(view);
+#endif
 		wlr_log(WLR_INFO,
 			"xwayland overlay-ready mapped=0 box=%d,%d %dx%d surf=%dx%d",
 			view->current.x, view->current.y,
@@ -531,8 +538,49 @@ xwayland_view_configure(struct view *view, struct wlr_box geo)
 		view->current.x = geo.x;
 		view->current.y = geo.y;
 		view_moved(view);
+#if HAVE_ANDROID_EMBED
+	} else if (!view->mapped) {
+		/*
+		 * AHB overlays never commit a wl_buffer, so the
+		 * commit-driven current update never runs.
+		 */
+		view->current = geo;
+		view_moved(view);
+#endif
 	}
 }
+
+#if HAVE_ANDROID_EMBED
+/*
+ * SSD is drawn above view->current. Unmapped AHB views never go
+ * through map/placement, so a client at y=16 hides the titlebar
+ * off the top of the output. Push the client down.
+ */
+static void
+embed_uncover_ssd(struct view *view)
+{
+	struct border margin;
+	struct wlr_box geo;
+
+	if (view->mapped || view->fullscreen
+			|| view->ssd_mode == LAB_SSD_MODE_NONE) {
+		return;
+	}
+	margin = ssd_thickness(view);
+	if (margin.top <= 0) {
+		return;
+	}
+	geo = wlr_box_empty(&view->pending) ? view->current : view->pending;
+	if (geo.width <= 0 || geo.height <= 0) {
+		return;
+	}
+	if (geo.y >= margin.top) {
+		return;
+	}
+	geo.y = margin.top;
+	xwayland_view_configure(view, geo);
+}
+#endif
 
 static void
 handle_request_configure(struct wl_listener *listener, void *data)
@@ -682,6 +730,9 @@ handle_set_decorations(struct wl_listener *listener, void *data)
 	} else {
 		view_set_ssd_mode(view, LAB_SSD_MODE_NONE);
 	}
+#if HAVE_ANDROID_EMBED
+	embed_uncover_ssd(view);
+#endif
 }
 
 static void

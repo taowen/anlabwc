@@ -105,7 +105,6 @@ noreturn static void exec_xwayland(struct wlr_xwayland_server *server,
 	{
 		const char *xkbdir = getenv("XKB_CONFIG_ROOT");
 		argv[i++] = "-ac";
-		argv[i++] = "-nokeymap";
 		argv[i++] = "-noreset";
 		if (xkbdir && xkbdir[0]) {
 			argv[i++] = "-xkbdir";
