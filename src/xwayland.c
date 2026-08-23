@@ -336,6 +336,20 @@ handle_commit(struct wl_listener *listener, void *data)
 	struct wlr_surface_state *state = &view->surface->current;
 	struct wlr_box *current = &view->current;
 
+#if HAVE_ANDROID_EMBED
+	/* Mesa/GLX may select an ARGB visual for an ordinary managed window and
+	 * clear alpha to zero (Blender does this). The window is still an opaque
+	 * X11 toplevel; without an opaque region Pixman reveals windows below it.
+	 * Keep real popup/menu alpha intact. */
+	if (state->width > 0 && state->height > 0
+			&& !xwayland_is_popup_type(xwayland_surface_from_view(view))) {
+		pixman_region32_clear(&view->surface->opaque_region);
+		pixman_region32_union_rect(&view->surface->opaque_region,
+			&view->surface->opaque_region, 0, 0,
+			(uint32_t)state->width, (uint32_t)state->height);
+	}
+#endif
+
 	/*
 	 * If there is a pending move/resize, wait until the surface
 	 * size changes to update geometry. The hope is to update both
