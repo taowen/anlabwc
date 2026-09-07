@@ -443,6 +443,7 @@ surface_handle_destroy(struct wl_listener *listener, void *data)
 	struct surface_hook *hook = wl_container_of(listener, hook, destroy);
 
 	(void)data;
+	gpu_overlay_forget_surface(hook->surface);
 	wl_list_remove(&hook->commit.link);
 	wl_list_remove(&hook->destroy.link);
 	free(hook);
@@ -473,7 +474,7 @@ surface_handle_commit(struct wl_listener *listener, void *data)
 	if (pid <= 0) {
 		return;
 	}
-	(void)anlabwc_present_ahb_view(wlegl->ahb, ANLABWC_GPU_WAYLAND, 0,
+	(void)gpu_overlay_present_surface(surface, wlegl->ahb,
 		(uint32_t)pid, buf->width, buf->height);
 }
 

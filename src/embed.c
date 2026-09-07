@@ -3,6 +3,7 @@
 #include "config.h"
 
 #include "anlabwc-embed.h"
+#include "android_wlegl.h"
 
 #include <pthread.h>
 #include <errno.h>
@@ -68,6 +69,7 @@ enum gpu_bind_kind {
 #define GPU_BIND_MAX WLR_ANDROID_AHB_MAX
 
 struct gpu_bind {
+	struct wlr_surface *surface;
 	int kind;
 	uint32_t id;
 	uint32_t pid;
@@ -93,7 +95,8 @@ gpu_bind_release(struct gpu_bind *b)
 
 static int
 gpu_bind_store(int kind, uint32_t id, uint32_t pid, int x, int y,
-	int buf_w, int buf_h, struct AHardwareBuffer *ahb)
+	int buf_w, int buf_h, struct AHardwareBuffer *ahb,
+	struct wlr_surface *surface)
 {
 	int i;
 	struct gpu_bind *slot = NULL;
@@ -103,8 +106,9 @@ gpu_bind_store(int kind, uint32_t id, uint32_t pid, int x, int y,
 	}
 	pthread_mutex_lock(&gpu_lock);
 	for (i = 0; i < gpu_n; i++) {
-		if (gpu_binds[i].kind == kind && gpu_binds[i].id == id
-				&& gpu_binds[i].pid == pid) {
+		if (gpu_binds[i].surface == surface
+				&& (surface || (gpu_binds[i].kind == kind
+				&& gpu_binds[i].id == id && gpu_binds[i].pid == pid))) {
 			slot = &gpu_binds[i];
 			break;
 		}
@@ -119,6 +123,7 @@ gpu_bind_store(int kind, uint32_t id, uint32_t pid, int x, int y,
 	}
 	gpu_bind_release(slot);
 	AHardwareBuffer_acquire(ahb);
+	slot->surface = surface;
 	slot->kind = kind;
 	slot->id = id;
 	slot->pid = pid;
@@ -272,7 +277,8 @@ gpu_resolve_bind(const struct gpu_bind *b, int *x, int *y, int *w, int *h)
 				continue;
 			}
 			vpid = view->impl->get_pid(view);
-			if (vpid >= 0 && (uint32_t)vpid == b->pid
+			if ((b->surface ? view->surface == b->surface
+					: vpid >= 0 && (uint32_t)vpid == b->pid)
 					&& gpu_view_dest(view, b, x, y, w, h)) {
 				return true;
 			}
@@ -488,7 +494,7 @@ anlabwc_present_ahb(struct AHardwareBuffer *ahb, int x, int y, int w, int h)
 	if (!ahb || w <= 0 || h <= 0 || !server.embed.android) {
 		return -1;
 	}
-	if (gpu_bind_store(GPU_BIND_SCREEN, 0, 0, x, y, w, h, ahb) != 0) {
+	if (gpu_bind_store(GPU_BIND_SCREEN, 0, 0, x, y, w, h, ahb, NULL) != 0) {
 		return -1;
 	}
 	struct embed_msg msg = { .type = EMBED_REDRAW };
@@ -505,11 +511,57 @@ anlabwc_present_ahb_view(struct AHardwareBuffer *ahb, int kind, uint32_t id,
 	if (kind != GPU_BIND_X11 && kind != GPU_BIND_WAYLAND) {
 		return -1;
 	}
-	if (gpu_bind_store(kind, id, pid, 0, 0, w, h, ahb) != 0) {
+	if (gpu_bind_store(kind, id, pid, 0, 0, w, h, ahb, NULL) != 0) {
 		return -1;
 	}
 	struct embed_msg msg = { .type = EMBED_REDRAW };
 	return send_msg(&msg);
+}
+
+int
+gpu_overlay_present_surface(struct wlr_surface *surface,
+	struct AHardwareBuffer *ahb, unsigned int pid, int width, int height)
+{
+	if (!surface || !server.embed.android
+			|| gpu_bind_store(GPU_BIND_WAYLAND, 0, pid, 0, 0,
+				width, height, ahb, surface) != 0) {
+		return -1;
+	}
+	struct embed_msg msg = { .type = EMBED_REDRAW };
+	return send_msg(&msg);
+}
+
+void
+gpu_overlay_forget_surface(struct wlr_surface *surface)
+{
+	struct gpu_bind retired = {0};
+	int remaining;
+
+	pthread_mutex_lock(&gpu_lock);
+	for (int i = 0; i < gpu_n; i++) {
+		if (gpu_binds[i].surface != surface) {
+			continue;
+		}
+		retired = gpu_binds[i];
+		memmove(&gpu_binds[i], &gpu_binds[i + 1],
+			(size_t)(gpu_n - i - 1) * sizeof(gpu_binds[0]));
+		memset(&gpu_binds[--gpu_n], 0, sizeof(gpu_binds[0]));
+		break;
+	}
+	remaining = gpu_n;
+	pthread_mutex_unlock(&gpu_lock);
+	if (!retired.ahb) {
+		return;
+	}
+	gpu_bind_release(&retired);
+	/* Also retire the backend overlay's reference without waiting for another
+	 * client to draw. Surface callbacks and overlay resolution share this
+	 * compositor thread; no dead surface is left in either table. */
+	gpu_overlay_sync();
+	struct embed_msg msg = { .type = EMBED_REDRAW };
+	(void)send_msg(&msg);
+	wlr_log(WLR_INFO, "GPU Wayland binding retired pid=%u active=%d",
+		retired.pid, remaining);
 }
 
 ANLABWC_API const char *
