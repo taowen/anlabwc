@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <math.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -15,6 +16,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <wlr/backend/android.h>
+#include <wlr/types/wlr_cursor.h>
 #include <wlr/util/log.h>
 #include <wlr/version.h>
 #include "common/font.h"
@@ -89,7 +91,14 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);
 		break;
 	case EMBED_PTR_BUTTON:
-		wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);
+		/* A synthetic motion on release starts titlebar drag bindings even
+		 * when the finger did not move, consuming an ordinary button click.
+		 * Compare against the seat so virtual-pointer motion is also honored.
+		 */
+		if (fabs(server.seat.cursor->x - msg.x) > 0.01
+				|| fabs(server.seat.cursor->y - msg.y) > 0.01) {
+			wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);
+		}
 		wlr_android_pointer_button(server.embed.android, msg.button,
 			msg.pressed != 0);
 		break;
