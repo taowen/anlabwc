@@ -144,3 +144,7 @@ uint32_t buffer_get_drm_format(struct wlr_buffer *buffer) {
 	}
 	return format;
 }
+
+struct AHardwareBuffer *wlr_buffer_get_ahb(struct wlr_buffer *buffer) {
+	return buffer && buffer->impl->get_ahb ? buffer->impl->get_ahb(buffer) : NULL;
+}

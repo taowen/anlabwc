@@ -14,6 +14,7 @@
 #include <wlr/render/dmabuf.h>
 #include <wlr/util/addon.h>
 
+struct AHardwareBuffer;
 struct wlr_buffer;
 struct wlr_renderer;
 
@@ -38,6 +39,7 @@ enum wlr_buffer_cap {
 	WLR_BUFFER_CAP_DATA_PTR = 1 << 0,
 	WLR_BUFFER_CAP_DMABUF = 1 << 1,
 	WLR_BUFFER_CAP_SHM = 1 << 2,
+	WLR_BUFFER_CAP_AHB = 1 << 3,
 };
 
 /**
@@ -70,6 +72,8 @@ struct wlr_buffer {
  * they are done with the buffer.
  */
 void wlr_buffer_drop(struct wlr_buffer *buffer);
+/** Borrow an Android hardware buffer for the lifetime of a buffer lock. */
+struct AHardwareBuffer *wlr_buffer_get_ahb(struct wlr_buffer *buffer);
 /**
  * Lock the buffer. This function should be called by consumers to make
  * sure the buffer can be safely read from. Once the consumer is done with the

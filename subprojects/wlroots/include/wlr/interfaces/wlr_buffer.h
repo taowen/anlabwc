@@ -12,6 +12,7 @@
 #include <wlr/types/wlr_buffer.h>
 
 struct wlr_buffer_impl {
+	struct AHardwareBuffer *(*get_ahb)(struct wlr_buffer *buffer);
 	void (*destroy)(struct wlr_buffer *buffer);
 	bool (*get_dmabuf)(struct wlr_buffer *buffer,
 		struct wlr_dmabuf_attributes *attribs);

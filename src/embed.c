@@ -222,7 +222,6 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	setenv("XDG_RUNTIME_DIR", runtime_dir, 1);
 	setenv("HOME", runtime_dir, 1);
 	setenv("XDG_CONFIG_HOME", runtime_dir, 1);
-	setenv("WLR_RENDERER", "pixman", 1);
 	setenv("XDG_SESSION_TYPE", "wayland", 1);
 	setenv("XDG_CURRENT_DESKTOP", "wlroots:labwc", 1);
 

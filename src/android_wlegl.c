@@ -21,10 +21,6 @@
 #include <wlr/types/wlr_compositor.h>
 #include "wayland-android-protocol.h"
 
-#ifndef DRM_FORMAT_ARGB8888
-#define DRM_FORMAT_ARGB8888 0x34325241u
-#endif
-
 #define AHB_METHOD_CLONE 3
 
 struct native_handle_hdr {
@@ -117,8 +113,6 @@ struct wlegl_buffer {
 	struct wlr_buffer base;
 	struct wl_resource *resource;
 	struct wl_listener release;
-	uint8_t *pixels;
-	size_t stride;
 	AHardwareBuffer *ahb;
 };
 
@@ -161,41 +155,22 @@ buffer_destroy(struct wlr_buffer *wlr_buffer)
 	if (buffer->ahb) {
 		AHardwareBuffer_release(buffer->ahb);
 	}
-	free(buffer->pixels);
 	if (buffer->resource) {
 		wl_resource_set_user_data(buffer->resource, NULL);
 	}
 	free(buffer);
 }
 
-static bool
-buffer_begin_data_ptr_access(struct wlr_buffer *wlr_buffer, uint32_t flags,
-	void **data, uint32_t *format, size_t *stride)
+static struct AHardwareBuffer *
+buffer_get_ahb(struct wlr_buffer *wlr_buffer)
 {
 	struct wlegl_buffer *buffer = wl_container_of(wlr_buffer, buffer, base);
-
-	if (flags & ~WLR_BUFFER_DATA_PTR_ACCESS_READ) {
-		return false;
-	}
-	if (!buffer->pixels) {
-		return false;
-	}
-	*data = buffer->pixels;
-	*format = DRM_FORMAT_ARGB8888;
-	*stride = buffer->stride;
-	return true;
-}
-
-static void
-buffer_end_data_ptr_access(struct wlr_buffer *wlr_buffer)
-{
-	(void)wlr_buffer;
+	return buffer->ahb;
 }
 
 static const struct wlr_buffer_impl buffer_impl = {
 	.destroy = buffer_destroy,
-	.begin_data_ptr_access = buffer_begin_data_ptr_access,
-	.end_data_ptr_access = buffer_end_data_ptr_access,
+	.get_ahb = buffer_get_ahb,
 };
 
 static void
@@ -340,15 +315,8 @@ create_buffer(struct wl_client *client, uint32_t id, AHardwareBuffer *ahb)
 	if (!buffer) {
 		goto fail;
 	}
-	buffer->stride = (size_t)desc.width * 4;
-	buffer->pixels = calloc(desc.height, buffer->stride);
-	if (!buffer->pixels) {
-		free(buffer);
-		goto fail;
-	}
 	buffer->resource = wl_resource_create(client, &wl_buffer_interface, 1, id);
 	if (!buffer->resource) {
-		free(buffer->pixels);
 		free(buffer);
 		goto fail;
 	}
@@ -461,22 +429,6 @@ wlegl_bind(struct wl_client *client, void *data, uint32_t version, uint32_t id)
 		return;
 	}
 	wl_resource_set_implementation(resource, &wlegl_impl, NULL, NULL);
-}
-
-struct AHardwareBuffer *
-android_wlegl_ahb_from_buffer(struct wlr_buffer *wlr_buffer)
-{
-	struct wlegl_buffer *buffer;
-
-	if (wlr_buffer) {
-		struct wlr_client_buffer *client = wlr_client_buffer_get(wlr_buffer);
-		if (client) wlr_buffer = client->source;
-	}
-	if (!wlr_buffer || wlr_buffer->impl != &buffer_impl) {
-		return NULL;
-	}
-	buffer = wl_container_of(wlr_buffer, buffer, base);
-	return buffer->ahb;
 }
 
 void

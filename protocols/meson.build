@@ -16,8 +16,10 @@ wayland_scanner_server = generator(
 server_protocols = [
 	'wlr-layer-shell-unstable-v1.xml',
 	'wlr-output-power-management-unstable-v1.xml',
-	'wayland-android.xml',
 ]
+if have_android_embed
+	server_protocols += dependency('ardesk-wsi-protocols', version: '>=0.3').get_variable('pkgdatadir') / 'wayland-android.xml'
+endif
 
 server_protos_src = []
 server_protos_headers = []

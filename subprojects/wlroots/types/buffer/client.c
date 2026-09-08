@@ -76,7 +76,12 @@ static void client_buffer_end_data_ptr_access(struct wlr_buffer *buffer) {
 	wlr_buffer_end_data_ptr_access(client_buffer->source);
 }
 
+static struct AHardwareBuffer *client_buffer_get_ahb(struct wlr_buffer *buffer) {
+	return wlr_buffer_get_ahb(client_buffer_from_buffer(buffer)->source);
+}
+
 static const struct wlr_buffer_impl client_buffer_impl = {
+	.get_ahb = client_buffer_get_ahb,
 	.destroy = client_buffer_destroy,
 	.get_dmabuf = client_buffer_get_dmabuf,
 	.get_shm = client_buffer_get_shm,

@@ -405,19 +405,41 @@ get_headless_backend(struct wlr_backend *backend, void *data)
 	}
 }
 
+static struct wlr_renderer *
+create_renderer(void)
+{
+#if HAVE_ANDROID_EMBED
+	if (server.embed.android) {
+		return wlr_android_renderer_create(server.embed.android);
+	}
+#endif
+	return wlr_renderer_autocreate(server.backend);
+}
+
+static struct wlr_allocator *
+create_allocator(struct wlr_renderer *renderer)
+{
+#if HAVE_ANDROID_EMBED
+	if (server.embed.android) {
+		return wlr_android_allocator_create();
+	}
+#endif
+	return wlr_allocator_autocreate(server.backend, renderer);
+}
+
 static void
 handle_renderer_lost(struct wl_listener *listener, void *data)
 {
 	wlr_log(WLR_INFO, "Re-creating renderer after GPU reset");
 
-	struct wlr_renderer *renderer = wlr_renderer_autocreate(server.backend);
+	struct wlr_renderer *renderer = create_renderer();
 	if (!renderer) {
 		wlr_log(WLR_ERROR, "Unable to create renderer");
 		return;
 	}
 
 	struct wlr_allocator *allocator =
-		wlr_allocator_autocreate(server.backend, renderer);
+		create_allocator(renderer);
 	if (!allocator) {
 		wlr_log(WLR_ERROR, "Unable to create allocator");
 		wlr_renderer_destroy(renderer);
@@ -592,7 +614,7 @@ server_init(void)
 	 * The renderer is responsible for defining the various pixel formats it
 	 * supports for shared memory, this configures that for clients.
 	 */
-	server.renderer = wlr_renderer_autocreate(server.backend);
+	server.renderer = create_renderer();
 	if (!server.renderer) {
 		wlr_log(WLR_ERROR, "unable to create renderer");
 		exit(EXIT_FAILURE);
@@ -631,8 +653,7 @@ server_init(void)
 	 * the renderer and the backend. It handles the buffer creation,
 	 * allowing wlroots to render onto the screen
 	 */
-	server.allocator = wlr_allocator_autocreate(
-		server.backend, server.renderer);
+	server.allocator = create_allocator(server.renderer);
 	if (!server.allocator) {
 		wlr_log(WLR_ERROR, "unable to create allocator");
 		exit(EXIT_FAILURE);

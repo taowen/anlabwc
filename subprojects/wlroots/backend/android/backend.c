@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <pthread.h>
 #include <stdlib.h>
 #include <android/native_window.h>
 #include <wayland-server-protocol.h>
@@ -58,7 +57,6 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 	wlr_keyboard_finish(&backend->keyboard);
 
 	wl_list_remove(&backend->event_loop_destroy.link);
-	pthread_mutex_destroy(&backend->overlay.lock);
 	if (backend->window) {
 		ANativeWindow_release(backend->window);
 		backend->window = NULL;
@@ -94,7 +92,7 @@ struct wlr_backend *wlr_android_backend_create(struct wl_event_loop *loop,
 
 	wlr_backend_init(&backend->backend, &backend_impl);
 	backend->backend.buffer_caps =
-		WLR_BUFFER_CAP_DATA_PTR | WLR_BUFFER_CAP_SHM;
+		WLR_BUFFER_CAP_AHB;
 	backend->event_loop = loop;
 	backend->window = window;
 	ANativeWindow_acquire(window);
@@ -108,11 +106,7 @@ struct wlr_backend *wlr_android_backend_create(struct wl_event_loop *loop,
 	wlr_pointer_init(&backend->pointer, &pointer_impl, "anlabwc-android-pointer");
 	wlr_keyboard_init(&backend->keyboard, &keyboard_impl,
 		"anlabwc-android-keyboard");
-	pthread_mutex_init(&backend->overlay.lock, NULL);
-	backend->gles.dpy = EGL_NO_DISPLAY;
-	backend->gles.ctx = EGL_NO_CONTEXT;
-	backend->gles.surf = EGL_NO_SURFACE;
-	backend->gles.image = EGL_NO_IMAGE_KHR;
+
 
 	if (!android_output_init(backend)) {
 		backend_destroy(&backend->backend);

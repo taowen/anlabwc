@@ -5,7 +5,14 @@ Fork of [labwc](https://github.com/labwc/labwc) for
 (`5aaa5da0`). This tree adds a wlroots `ANativeWindow` backend,
 `android_wlegl`, and `libanlabwc.so` so the compositor presents onto an
 Android Surface in-process. GPU clients submit AHB via `android_wlegl`
-(X11 through TAWC-DRI Xwayland). There is no compositor overlay API.
+(X11 through TAWC-DRI Xwayland). Native EGL imports each AHB as a wlroots
+texture; one scene render pass composites it with shm windows and decorations
+into an AHB. The backend presents that buffer to the Surface. There is no
+pixman desktop upload, compositor overlay API or fixed AHB slot array.
+
+The build requires the shared `ardesk-wsi-protocols` pkg-config package from
+Ardesk `protocols/`. Set the cross-build `pkg_config_path` to that directory
+and the target dependency prefix. Ardesk build scripts do this automatically.
 
 Build the Android embed library:
 

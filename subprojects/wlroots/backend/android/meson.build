@@ -15,4 +15,5 @@ wlr_deps += [android_dep, egl_dep, gles_dep]
 wlr_files += files(
 	'backend.c',
 	'output.c',
+	'../../render/android.c',
 )

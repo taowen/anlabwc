@@ -39,12 +39,6 @@
 #include "view.h"
 #include "xwayland.h"
 
-#if HAVE_ANDROID_EMBED
-#include <android/hardware_buffer.h>
-#include <wlr/backend/android.h>
-#include "android_wlegl.h"
-#endif
-
 #if WLR_HAS_X11_BACKEND
 	#include <wlr/backend/x11.h>
 #endif
@@ -254,39 +248,6 @@ output_get_tearing_allowance(struct output *output)
 	return view->force_tearing == LAB_STATE_ENABLED;
 }
 
-#if HAVE_ANDROID_EMBED
-static void
-collect_android_ahb(struct wlr_scene_buffer *scene_buffer, int sx, int sy,
-		void *data)
-{
-	struct {
-		struct wlr_android_ahb_blit slots[WLR_ANDROID_AHB_MAX];
-		int n;
-	} *ahb = data;
-	struct wlr_buffer *buf = scene_buffer->buffer;
-	struct AHardwareBuffer *handle;
-	int w, h;
-
-	if (ahb->n >= WLR_ANDROID_AHB_MAX || !buf) {
-		return;
-	}
-	handle = android_wlegl_ahb_from_buffer(buf);
-	if (!handle) {
-		return;
-	}
-	w = scene_buffer->dst_width > 0 ? scene_buffer->dst_width : buf->width;
-	h = scene_buffer->dst_height > 0 ? scene_buffer->dst_height : buf->height;
-	if (w <= 0 || h <= 0) {
-		return;
-	}
-	ahb->slots[ahb->n].ahb = handle;
-	ahb->slots[ahb->n].x = sx;
-	ahb->slots[ahb->n].y = sy;
-	ahb->slots[ahb->n].w = w;
-	ahb->slots[ahb->n].h = h;
-	ahb->n++;
-}
-#endif
 
 static void
 handle_output_frame(struct wl_listener *listener, void *data)
@@ -314,19 +275,7 @@ handle_output_frame(struct wl_listener *listener, void *data)
 
 	pending->tearing_page_flip = output_get_tearing_allowance(output);
 
-#if HAVE_ANDROID_EMBED
-	if (server.embed.android) {
-		struct {
-			struct wlr_android_ahb_blit slots[WLR_ANDROID_AHB_MAX];
-			int n;
-		} ahb = {0};
 
-		wlr_scene_output_for_each_buffer(scene_output,
-			collect_android_ahb, &ahb);
-		wlr_android_present_ahb_slots(server.embed.android,
-			ahb.slots, ahb.n);
-	}
-#endif
 
 	lab_wlr_scene_output_commit(scene_output, pending);
 
