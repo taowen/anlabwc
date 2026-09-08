@@ -36,7 +36,7 @@ labwc_sources = files(
 )
 
 if have_android_embed
-  labwc_sources += files('embed.c')
+  labwc_sources += files('embed.c', 'android_wlegl.c')
 endif
 
 if have_xwayland

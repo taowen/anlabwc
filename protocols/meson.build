@@ -16,6 +16,7 @@ wayland_scanner_server = generator(
 server_protocols = [
 	'wlr-layer-shell-unstable-v1.xml',
 	'wlr-output-power-management-unstable-v1.xml',
+	'wayland-android.xml',
 ]
 
 server_protos_src = []

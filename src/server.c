@@ -10,6 +10,7 @@
 #if HAVE_ANDROID_EMBED
 #include <android/native_window.h>
 #include <wlr/backend/android.h>
+#include "android_wlegl.h"
 #endif
 #include <wlr/config.h>
 #include <wlr/render/allocator.h>
@@ -741,6 +742,9 @@ server_init(void)
 		exit(EXIT_FAILURE);
 	}
 	wlr_subcompositor_create(server.wl_display);
+#if HAVE_ANDROID_EMBED
+	android_wlegl_create(server.wl_display, server.compositor);
+#endif
 
 	struct wlr_data_device_manager *device_manager = NULL;
 	device_manager = wlr_data_device_manager_create(server.wl_display);

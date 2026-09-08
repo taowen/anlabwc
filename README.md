@@ -1,10 +1,11 @@
 # anlabwc
 
 Fork of [labwc](https://github.com/labwc/labwc) for
-[Ardesk](https://github.com/taowen/ardesk). Upstream stays `upstream`;
-this tree adds a wlroots `ANativeWindow` backend and `libanlabwc.so`
-so the compositor can `egl`/pixman-present onto an Android Surface in
-the same process as the Activity (no Anland daemon).
+[Ardesk](https://github.com/taowen/ardesk). Re-based on labwc 0.20.1
+(`5aaa5da0`). This tree adds a wlroots `ANativeWindow` backend,
+`android_wlegl`, and `libanlabwc.so` so the compositor presents onto an
+Android Surface in-process. GPU clients submit AHB via `android_wlegl`
+(X11 through TAWC-DRI Xwayland). There is no compositor overlay API.
 
 Build the Android embed library:
 
