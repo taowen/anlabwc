@@ -152,6 +152,40 @@ void wlr_android_pointer_button(struct wlr_backend *wlr_backend,
 	wl_signal_emit_mutable(&backend->pointer.events.frame, NULL);
 }
 
+void wlr_android_pointer_axis(struct wlr_backend *wlr_backend,
+		double dx, double dy) {
+	struct wlr_android_backend *backend =
+		android_backend_from_backend(wlr_backend);
+	uint32_t now = (uint32_t)get_current_time_msec();
+	if (dy != 0) {
+		struct wlr_pointer_axis_event event = {
+			.pointer = &backend->pointer,
+			.time_msec = now,
+			.source = WL_POINTER_AXIS_SOURCE_FINGER,
+			.orientation = WL_POINTER_AXIS_VERTICAL_SCROLL,
+			.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+			.delta = dy,
+			.delta_discrete = 0,
+		};
+		wl_signal_emit_mutable(&backend->pointer.events.axis, &event);
+	}
+	if (dx != 0) {
+		struct wlr_pointer_axis_event event = {
+			.pointer = &backend->pointer,
+			.time_msec = now,
+			.source = WL_POINTER_AXIS_SOURCE_FINGER,
+			.orientation = WL_POINTER_AXIS_HORIZONTAL_SCROLL,
+			.relative_direction = WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL,
+			.delta = dx,
+			.delta_discrete = 0,
+		};
+		wl_signal_emit_mutable(&backend->pointer.events.axis, &event);
+	}
+	if (dx != 0 || dy != 0) {
+		wl_signal_emit_mutable(&backend->pointer.events.frame, NULL);
+	}
+}
+
 void wlr_android_keyboard_key(struct wlr_backend *wlr_backend,
 		uint32_t keycode, bool pressed) {
 	struct wlr_android_backend *backend =

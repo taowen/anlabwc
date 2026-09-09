@@ -17,8 +17,11 @@
 #include <unistd.h>
 #include <wlr/backend/android.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_keyboard.h>
+#include <wlr/types/wlr_keyboard_group.h>
 #include <wlr/util/log.h>
 #include <wlr/version.h>
+#include <xkbcommon/xkbcommon.h>
 #include "common/font.h"
 #include "common/fd-util.h"
 #include "common/macros.h"
@@ -38,7 +41,11 @@ enum {
 	EMBED_PTR_MOTION = 1,
 	EMBED_PTR_BUTTON,
 	EMBED_KEY,
+	EMBED_AXIS,
+	EMBED_UNICODE,
 };
+
+#define EVDEV_LEFTSHIFT 42u
 
 struct embed_msg {
 	uint32_t type;
@@ -76,6 +83,89 @@ send_msg(const struct embed_msg *msg)
 	return n == (ssize_t)sizeof(*msg) ? 0 : -1;
 }
 
+static void
+embed_send_key(uint32_t evdev, bool pressed)
+{
+	if (!server.embed.android) {
+		return;
+	}
+	wlr_android_keyboard_key(server.embed.android, evdev, pressed);
+}
+
+/*
+ * Map a Unicode codepoint onto the current XKB layout (level 0 or Shift).
+ * IME ASCII/punctuation lives here; CJK is typically not in the US map.
+ */
+static void
+embed_send_unicode(uint32_t codepoint)
+{
+	struct wlr_keyboard *kb;
+	struct xkb_keymap *keymap;
+	xkb_keysym_t want;
+	xkb_keycode_t min_kc, max_kc, kc;
+	xkb_mod_index_t shift_idx;
+	bool shift_down;
+	int found_evdev = -1;
+	bool need_shift = false;
+
+	if (!server.seat.keyboard_group) {
+		return;
+	}
+	kb = &server.seat.keyboard_group->keyboard;
+	keymap = kb->keymap;
+	if (!keymap || !kb->xkb_state) {
+		return;
+	}
+	want = xkb_utf32_to_keysym(codepoint);
+	if (want == XKB_KEY_NoSymbol) {
+		return;
+	}
+	min_kc = xkb_keymap_min_keycode(keymap);
+	max_kc = xkb_keymap_max_keycode(keymap);
+	for (kc = min_kc; kc <= max_kc; kc++) {
+		int level;
+		int nlevels = xkb_keymap_num_levels_for_key(keymap, kc, 0);
+
+		for (level = 0; level < nlevels && level < 2; level++) {
+			const xkb_keysym_t *syms;
+			int n = xkb_keymap_key_get_syms_by_level(keymap, kc, 0,
+				(xkb_level_index_t)level, &syms);
+			int i;
+
+			for (i = 0; i < n; i++) {
+				if (syms[i] != want) {
+					continue;
+				}
+				found_evdev = (int)kc - 8;
+				need_shift = level > 0;
+				goto found;
+			}
+		}
+	}
+found:
+	if (found_evdev <= 0) {
+		wlr_log(WLR_DEBUG, "embed unicode U+%04X not in keymap",
+			codepoint);
+		return;
+	}
+	shift_idx = xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_SHIFT);
+	shift_down = shift_idx != XKB_MOD_INVALID
+		&& xkb_state_mod_index_is_active(kb->xkb_state, shift_idx,
+			XKB_STATE_MODS_DEPRESSED);
+	if (need_shift && !shift_down) {
+		embed_send_key(EVDEV_LEFTSHIFT, true);
+	} else if (!need_shift && shift_down) {
+		embed_send_key(EVDEV_LEFTSHIFT, false);
+	}
+	embed_send_key((uint32_t)found_evdev, true);
+	embed_send_key((uint32_t)found_evdev, false);
+	if (need_shift && !shift_down) {
+		embed_send_key(EVDEV_LEFTSHIFT, false);
+	} else if (!need_shift && shift_down) {
+		embed_send_key(EVDEV_LEFTSHIFT, true);
+	}
+}
+
 int
 anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 {
@@ -106,6 +196,12 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		wlr_android_keyboard_key(server.embed.android, msg.keycode,
 			msg.pressed != 0);
 		break;
+	case EMBED_AXIS:
+		wlr_android_pointer_axis(server.embed.android, msg.x, msg.y);
+		break;
+	case EMBED_UNICODE:
+		embed_send_unicode(msg.button);
+		break;
 	default:
 		break;
 	}
@@ -126,6 +222,17 @@ anlabwc_pointer(float x, float y, int button, int pressed)
 }
 
 ANLABWC_API int
+anlabwc_axis(float dx, float dy)
+{
+	struct embed_msg msg = {
+		.type = EMBED_AXIS,
+		.x = dx,
+		.y = dy,
+	};
+	return send_msg(&msg);
+}
+
+ANLABWC_API int
 anlabwc_key(int evdev, int pressed)
 {
 	if (evdev <= 0) {
@@ -135,6 +242,19 @@ anlabwc_key(int evdev, int pressed)
 		.type = EMBED_KEY,
 		.keycode = (uint32_t)evdev,
 		.pressed = pressed,
+	};
+	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_unicode(uint32_t codepoint)
+{
+	if (codepoint == 0 || codepoint > 0x10FFFFu) {
+		return -1;
+	}
+	struct embed_msg msg = {
+		.type = EMBED_UNICODE,
+		.button = codepoint,
 	};
 	return send_msg(&msg);
 }
