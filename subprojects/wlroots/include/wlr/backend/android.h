@@ -24,6 +24,8 @@ struct wlr_backend *wlr_android_backend_create(struct wl_event_loop *loop,
 	struct ANativeWindow *window, int width, int height);
 
 bool wlr_backend_is_android(struct wlr_backend *backend);
+bool wlr_android_backend_set_window(struct wlr_backend *backend,
+	struct ANativeWindow *window, int width, int height);
 
 void wlr_android_pointer_motion(struct wlr_backend *backend, double x, double y);
 void wlr_android_pointer_button(struct wlr_backend *backend, uint32_t button,

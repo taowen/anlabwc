@@ -120,6 +120,25 @@ bool wlr_backend_is_android(struct wlr_backend *backend) {
 	return backend && backend->impl == &backend_impl;
 }
 
+bool wlr_android_backend_set_window(struct wlr_backend *base,
+		struct ANativeWindow *window, int width, int height) {
+	struct wlr_android_backend *backend = android_backend_from_backend(base);
+	if (!android_renderer_set_window(backend->renderer, window)) return false;
+	if (window) ANativeWindow_acquire(window);
+	if (backend->window) ANativeWindow_release(backend->window);
+	backend->window = window;
+	if (window) {
+		struct wlr_output_state state;
+		wlr_output_state_init(&state);
+		wlr_output_state_set_custom_mode(&state, width, height, ANDROID_DEFAULT_REFRESH);
+		bool ok = wlr_output_commit_state(&backend->output, &state);
+		wlr_output_state_finish(&state);
+		wlr_output_schedule_frame(&backend->output);
+		return ok;
+	}
+	return true;
+}
+
 void wlr_android_pointer_motion(struct wlr_backend *wlr_backend,
 		double x, double y) {
 	struct wlr_android_backend *backend =

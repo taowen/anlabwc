@@ -29,6 +29,8 @@ struct android_renderer {
 	EGLDisplay display;
 	EGLContext context;
 	EGLSurface surface;
+	EGLSurface idle_surface;
+	EGLConfig config;
 	struct ANativeWindow *window;
 	GLuint rgba, external, solid;
 	struct wlr_drm_format_set shm_formats, ahb_formats;
@@ -411,6 +413,27 @@ bool android_renderer_present(struct wlr_renderer *base, struct wlr_buffer *buff
 	return ok;
 }
 
+bool android_renderer_set_window(struct wlr_renderer *base, struct ANativeWindow *window) {
+	struct android_renderer *r = wl_container_of(base, r, base);
+	if (!eglMakeCurrent(r->display, r->idle_surface, r->idle_surface, r->context)) return false;
+	if (r->surface != EGL_NO_SURFACE && r->surface != r->idle_surface)
+		eglDestroySurface(r->display, r->surface);
+	r->surface = r->idle_surface;
+	if (r->window) ANativeWindow_release(r->window);
+	r->window = NULL;
+	if (!window) return true;
+	EGLint visual;
+	if (!eglGetConfigAttrib(r->display, r->config, EGL_NATIVE_VISUAL_ID, &visual) ||
+			ANativeWindow_setBuffersGeometry(window, 0, 0, visual) != 0) return false;
+	EGLSurface surface = eglCreateWindowSurface(r->display, r->config,
+		(EGLNativeWindowType)window, NULL);
+	if (surface == EGL_NO_SURFACE) return false;
+	r->surface = surface;
+	r->window = window;
+	ANativeWindow_acquire(window);
+	return make_current(r);
+}
+
 static const struct wlr_drm_format_set *texture_formats(struct wlr_renderer *base, uint32_t caps) {
 	struct android_renderer *r = wl_container_of(base, r, base);
 	if (caps & WLR_BUFFER_CAP_AHB) {
@@ -439,6 +462,8 @@ static void renderer_destroy(struct wlr_renderer *base) {
 	if (r->display != EGL_NO_DISPLAY) {
 		eglMakeCurrent(r->display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 		if (r->surface != EGL_NO_SURFACE) eglDestroySurface(r->display, r->surface);
+		if (r->idle_surface != EGL_NO_SURFACE && r->idle_surface != r->surface)
+			eglDestroySurface(r->display, r->idle_surface);
 		if (r->context != EGL_NO_CONTEXT) eglDestroyContext(r->display, r->context);
 	}
 	if (r->window) ANativeWindow_release(r->window);
@@ -467,13 +492,17 @@ struct wlr_renderer *wlr_android_renderer_create(struct wlr_backend *base) {
 	ANativeWindow_acquire(r->window);
 	if (r->display == EGL_NO_DISPLAY || !eglInitialize(r->display, NULL, NULL) ||
 			!eglBindAPI(EGL_OPENGL_ES_API)) goto fail;
-	const EGLint attrs[] = {EGL_SURFACE_TYPE,EGL_WINDOW_BIT,
+	const EGLint attrs[] = {EGL_SURFACE_TYPE,EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
 		EGL_RED_SIZE,8,EGL_GREEN_SIZE,8,EGL_BLUE_SIZE,8,EGL_ALPHA_SIZE,8,
 		EGL_RENDERABLE_TYPE,EGL_OPENGL_ES2_BIT,EGL_NONE};
 	EGLConfig config;
 	EGLint n, visual;
 	if (!eglChooseConfig(r->display, attrs, &config, 1, &n) || n != 1 ||
 			!eglGetConfigAttrib(r->display, config, EGL_NATIVE_VISUAL_ID, &visual)) goto fail;
+	r->config = config;
+	const EGLint idle_attrs[] = {EGL_WIDTH,1,EGL_HEIGHT,1,EGL_NONE};
+	r->idle_surface = eglCreatePbufferSurface(r->display, config, idle_attrs);
+	if (r->idle_surface == EGL_NO_SURFACE) goto fail;
 	if (ANativeWindow_setBuffersGeometry(r->window, 0, 0, visual) != 0) goto fail;
 	const EGLint ctx[] = {EGL_CONTEXT_CLIENT_VERSION,2,EGL_NONE};
 	r->context = eglCreateContext(r->display, config, EGL_NO_CONTEXT, ctx);

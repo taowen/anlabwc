@@ -30,6 +30,7 @@ struct wlr_android_backend {
 struct wlr_android_backend *android_backend_from_backend(
 	struct wlr_backend *wlr_backend);
 bool android_renderer_present(struct wlr_renderer *renderer, struct wlr_buffer *buffer);
+bool android_renderer_set_window(struct wlr_renderer *renderer, struct ANativeWindow *window);
 bool android_output_init(struct wlr_android_backend *backend);
 
 #endif

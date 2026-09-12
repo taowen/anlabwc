@@ -10,6 +10,9 @@
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdatomic.h>
+#include <semaphore.h>
+#include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -43,6 +46,7 @@ enum {
 	EMBED_KEY,
 	EMBED_AXIS,
 	EMBED_UNICODE,
+	EMBED_WINDOW,
 };
 
 #define EVDEV_LEFTSHIFT 42u
@@ -54,7 +58,22 @@ struct embed_msg {
 	int32_t pressed;
 	float x;
 	float y;
+	uintptr_t request;
 };
+
+struct window_request {
+	struct ANativeWindow *window;
+	int width, height, result;
+	sem_t done;
+	atomic_int refs;
+};
+
+static void window_request_release(struct window_request *request) {
+	if (atomic_fetch_sub(&request->refs, 1) != 1) return;
+	if (request->window) ANativeWindow_release(request->window);
+	sem_destroy(&request->done);
+	free(request);
+}
 
 static char wayland_socket_path[512];
 static volatile bool running;
@@ -202,6 +221,14 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 	case EMBED_UNICODE:
 		embed_send_unicode(msg.button);
 		break;
+	case EMBED_WINDOW: {
+		struct window_request *request = (struct window_request *)msg.request;
+		request->result = wlr_android_backend_set_window(server.embed.android,
+			request->window, request->width, request->height) ? 0 : -1;
+		sem_post(&request->done);
+		window_request_release(request);
+		break;
+	}
 	default:
 		break;
 	}
@@ -219,6 +246,35 @@ anlabwc_pointer(float x, float y, int button, int pressed)
 		.y = y,
 	};
 	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_set_window(struct ANativeWindow *window, int width, int height)
+{
+	struct window_request *request = calloc(1, sizeof(*request));
+	if (!request) return -1;
+	if (sem_init(&request->done, 0, 0) != 0) { free(request); return -1; }
+	atomic_init(&request->refs, 2);
+	request->window = window;
+	request->width = width;
+	request->height = height;
+	if (window) ANativeWindow_acquire(window);
+	struct embed_msg msg = {.type=EMBED_WINDOW, .request=(uintptr_t)request};
+	int result = -1;
+	if (send_msg(&msg) == 0) {
+		// Acknowledge EGL detachment before Android releases the old Surface.
+		// The event-loop reference remains valid even if a stalled GPU times out.
+		struct timespec deadline;
+		clock_gettime(CLOCK_REALTIME, &deadline);
+		deadline.tv_sec += 5;
+		int rc;
+		do { rc = sem_timedwait(&request->done, &deadline); } while (rc < 0 && errno == EINTR);
+		if (rc == 0) result = request->result;
+	} else {
+		window_request_release(request);
+	}
+	window_request_release(request);
+	return result;
 }
 
 ANLABWC_API int

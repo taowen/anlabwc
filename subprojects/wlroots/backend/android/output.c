@@ -66,7 +66,7 @@ static bool output_commit(struct wlr_output *wlr_output,
 		backend->height = state->custom_mode.height;
 	}
 
-	if ((state->committed & WLR_OUTPUT_STATE_BUFFER) && state->buffer) {
+	if (backend->window && (state->committed & WLR_OUTPUT_STATE_BUFFER) && state->buffer) {
 		if (!backend->renderer ||
 				!android_renderer_present(backend->renderer, state->buffer)) {
 			return false;
@@ -76,10 +76,10 @@ static bool output_commit(struct wlr_output *wlr_output,
 	if (output_pending_enabled(wlr_output, state)) {
 		struct wlr_output_event_present present_event = {
 			.commit_seq = wlr_output->commit_seq + 1,
-			.presented = true,
+			.presented = backend->window != NULL,
 		};
 		output_defer_present(wlr_output, present_event);
-		if (backend->frame_timer) {
+		if (backend->frame_timer && backend->window) {
 			wl_event_source_timer_update(backend->frame_timer,
 				backend->frame_delay);
 		}
@@ -106,7 +106,7 @@ static const struct wlr_output_impl output_impl = {
 
 static int signal_frame(void *data) {
 	struct wlr_android_backend *backend = data;
-	wlr_output_send_frame(&backend->output);
+	if (backend->window) wlr_output_send_frame(&backend->output);
 	return 0;
 }
 
