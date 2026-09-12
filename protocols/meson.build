@@ -18,7 +18,7 @@ server_protocols = [
 	'wlr-output-power-management-unstable-v1.xml',
 ]
 if have_android_embed
-	server_protocols += dependency('ardesk-wsi-protocols', version: '>=0.3').get_variable('pkgdatadir') / 'wayland-android.xml'
+	server_protocols += dependency('arlinux-wsi-protocols', version: '>=0.3').get_variable('pkgdatadir') / 'wayland-android.xml'
 endif
 
 server_protos_src = []
