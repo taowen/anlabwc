@@ -135,6 +135,10 @@ if get_option('android-embed').enabled() and not have_android_embed
   error('android-embed requires <android/native_window.h>')
 endif
 conf_data.set10('HAVE_ANDROID_EMBED', have_android_embed)
+if have_android_embed
+  add_languages('cpp', required: true)
+  add_project_arguments('-std=c++20', language: 'cpp')
+endif
 
 foreach sym : ['LIBINPUT_CONFIG_DRAG_LOCK_ENABLED_STICKY', 'LIBINPUT_CONFIG_3FG_DRAG_ENABLED_3FG']
   has_sym = input.found() and input.type_name() != 'internal' \

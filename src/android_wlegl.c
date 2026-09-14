@@ -5,6 +5,7 @@
 #if HAVE_ANDROID_EMBED
 
 #include "android_wlegl.h"
+#include "android_buffer_layout.h"
 
 #include <android/hardware_buffer.h>
 #include <assert.h>
@@ -384,7 +385,8 @@ wlegl_get_server_buffer_handle(struct wl_client *client,
 		return;
 	}
 	struct wl_resource *reply = wl_resource_create(client,
-		&android_wlegl_server_buffer_handle_interface, 1, id);
+		&android_wlegl_server_buffer_handle_interface,
+		wl_resource_get_version(resource) >= 3 ? 3 : 1, id);
 	if (!reply) {
 		AHardwareBuffer_release(ahb);
 		wl_client_post_no_memory(client);
@@ -404,6 +406,12 @@ wlegl_get_server_buffer_handle(struct wl_client *client,
 				handle->data[i]);
 		}
 		android_wlegl_server_buffer_handle_send_buffer_ints(reply, &ints);
+		uint32_t layout_format, layout_stride;
+		if (wl_resource_get_version(reply) >= 3 &&
+			android_buffer_linear_layout(ahb, &layout_format, &layout_stride)) {
+			android_wlegl_server_buffer_handle_send_linear_layout(reply,
+				layout_format, layout_stride);
+		}
 		android_wlegl_server_buffer_handle_send_buffer(reply,
 			buffer->resource, desc.format, desc.stride);
 	}
@@ -436,7 +444,7 @@ android_wlegl_create(struct wl_display *display,
 	struct wlr_compositor *compositor)
 {
 	(void)compositor;
-	if (!wl_global_create(display, &android_wlegl_interface, 2, NULL, wlegl_bind)) {
+	if (!wl_global_create(display, &android_wlegl_interface, 3, NULL, wlegl_bind)) {
 		wlr_log(WLR_ERROR, "android_wlegl: global failed");
 		return;
 	}

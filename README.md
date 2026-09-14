@@ -10,7 +10,14 @@ texture; one scene render pass composites it with shm windows and decorations
 into an AHB. The backend presents that buffer to the Surface. There is no
 pixman desktop upload, compositor overlay API or fixed AHB slot array.
 
-The build requires the shared `arlinux-wsi-protocols` pkg-config package from
+The Android server advertises `android_wlegl` version 3 and sends `linear_layout`
+only when the platform's stable IMapper metadata verifies a linear RGBA/BGRA
+buffer. This lets Vulkan clients import modern Android buffers without guessing
+private handle fields. The mapper adapter and metadata decoder are ported from
+Arlinux's anhyprland commit `7335c`; see `include/imapper/README.md` for the AOSP
+declarations and fallback behavior. The Android build requires C++20.
+
+The build requires version 0.4 or newer of the shared `arlinux-wsi-protocols` pkg-config package from
 Arlinux `protocols/`. Set the cross-build `pkg_config_path` to that directory
 and the target dependency prefix. Arlinux build scripts do this automatically.
 
