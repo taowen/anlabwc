@@ -62,62 +62,19 @@ struct embed_msg {
 	uintptr_t request;
 };
 
-#define EMBED_HAND_COUNT 2
 #define EMBED_RIGHT_HAND 0
 
 static void
-embed_hand_cursors_init(void)
+embed_cursor_init(void)
 {
-	static const char *const shapes[EMBED_HAND_COUNT] = {
-		"left_ptr", "hand1",
-	};
-	static const double x_factors[EMBED_HAND_COUNT] = {0.75, 0.25};
-
-	if (server.embed.hand_cursors[0] || !server.output_layout
-			|| !server.seat.xcursor_manager) {
-		return;
-	}
-	for (int i = 0; i < EMBED_HAND_COUNT; ++i) {
-		struct wlr_cursor *cursor = wlr_cursor_create();
-		if (!cursor) {
-			continue;
-		}
-		server.embed.hand_cursors[i] = cursor;
-		wlr_cursor_attach_output_layout(cursor, server.output_layout);
-		wlr_cursor_warp(cursor, NULL, server.embed.width * x_factors[i],
-			server.embed.height * 0.5);
-		wlr_cursor_set_xcursor(cursor, server.seat.xcursor_manager, shapes[i]);
-	}
-	server.embed.active_hand = EMBED_RIGHT_HAND;
+	/* Android draws both logical hand pointers above the compositor Surface. */
 	cursor_set_visible(&server.seat, false);
-}
-
-static void
-embed_hand_cursors_finish(void)
-{
-	for (int i = 0; i < EMBED_HAND_COUNT; ++i) {
-		if (server.embed.hand_cursors[i]) {
-			wlr_cursor_destroy(server.embed.hand_cursors[i]);
-			server.embed.hand_cursors[i] = NULL;
-		}
-	}
 }
 
 static uint32_t
 embed_pointer_id(uint32_t pointer_id)
 {
-	return pointer_id < EMBED_HAND_COUNT ? pointer_id : EMBED_RIGHT_HAND;
-}
-
-static void
-embed_move_hand_cursor(uint32_t pointer_id, double x, double y)
-{
-	pointer_id = embed_pointer_id(pointer_id);
-	embed_hand_cursors_init();
-	server.embed.active_hand = (int)pointer_id;
-	if (server.embed.hand_cursors[pointer_id]) {
-		wlr_cursor_warp(server.embed.hand_cursors[pointer_id], NULL, x, y);
-	}
+	return pointer_id < 2 ? pointer_id : EMBED_RIGHT_HAND;
 }
 
 struct window_request {
@@ -136,6 +93,20 @@ static void window_request_release(struct window_request *request) {
 
 static char wayland_socket_path[512];
 static volatile bool running;
+static atomic_uint cursor_shape = 1;
+
+void
+anlabwc_embed_set_cursor_shape(uint32_t shape)
+{
+	atomic_store_explicit(&cursor_shape, shape > 0 ? shape : 1,
+		memory_order_relaxed);
+}
+
+ANLABWC_API int
+anlabwc_cursor_shape(void)
+{
+	return (int)atomic_load_explicit(&cursor_shape, memory_order_relaxed);
+}
 
 #ifdef __ANDROID__
 static void
@@ -256,12 +227,10 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 	}
 	switch (msg.type) {
 	case EMBED_PTR_MOTION:
-		embed_move_hand_cursor(msg.pointer_id, msg.x, msg.y);
 		wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);
 		cursor_set_visible(&server.seat, false);
 		break;
 	case EMBED_PTR_BUTTON:
-		embed_move_hand_cursor(msg.pointer_id, msg.x, msg.y);
 		/* A synthetic motion on release starts titlebar drag bindings even
 		 * when the finger did not move, consuming an ordinary button click.
 		 * Compare against the seat so virtual-pointer motion is also honored.
@@ -574,7 +543,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	increase_nofile_limit();
 	server_init();
 	server_start();
-	embed_hand_cursors_init();
+	embed_cursor_init();
 
 	struct theme theme = { 0 };
 	theme_init(&theme, rc.theme_name);
@@ -591,7 +560,6 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	theme_finish(&theme);
 	rcxml_finish();
 	font_finish();
-	embed_hand_cursors_finish();
 	server_finish();
 
 	if (server.embed.input_rd >= 0) {

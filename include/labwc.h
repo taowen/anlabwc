@@ -172,8 +172,6 @@ struct server {
 		int input_rd;
 		int input_wr;
 		struct wl_event_source *input_source;
-		struct wlr_cursor *hand_cursors[2];
-		int active_hand;
 	} embed;
 #endif
 	struct wlr_session *session;
@@ -470,6 +468,7 @@ void server_start(void);
 void server_finish(void);
 #if HAVE_ANDROID_EMBED
 int anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data);
+void anlabwc_embed_set_cursor_shape(uint32_t shape);
 #endif
 
 void create_constraint(struct wl_listener *listener, void *data);

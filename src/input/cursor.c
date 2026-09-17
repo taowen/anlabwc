@@ -82,6 +82,35 @@ static const char * const cursors_x11[] = {
 	"left_side"
 };
 
+#if HAVE_ANDROID_EMBED
+static uint32_t
+embed_shape_from_cursor(enum lab_cursors cursor)
+{
+	switch (cursor) {
+	case LAB_CURSOR_GRAB:
+		return 17;
+	case LAB_CURSOR_RESIZE_NW:
+		return 21;
+	case LAB_CURSOR_RESIZE_N:
+		return 19;
+	case LAB_CURSOR_RESIZE_NE:
+		return 20;
+	case LAB_CURSOR_RESIZE_E:
+		return 18;
+	case LAB_CURSOR_RESIZE_SE:
+		return 23;
+	case LAB_CURSOR_RESIZE_S:
+		return 22;
+	case LAB_CURSOR_RESIZE_SW:
+		return 24;
+	case LAB_CURSOR_RESIZE_W:
+		return 25;
+	default:
+		return 1;
+	}
+}
+#endif
+
 static_assert(
 	ARRAY_SIZE(cursors_xdg) == LAB_CURSOR_COUNT,
 	"XDG cursor names are out of sync");
@@ -158,14 +187,6 @@ handle_request_set_cursor(struct wl_listener *listener, void *data)
 	}
 
 	/*
-	 * Omit cursor notifications when the current cursor is
-	 * invisible, e.g. on touch input.
-	 */
-	if (!seat->cursor_visible) {
-		return;
-	}
-
-	/*
 	 * Omit cursor notifications from a pointer when a tablet
 	 * tool (stylus/pen) is in proximity. We expect to get cursor
 	 * notifications from the tablet tool instead.
@@ -191,6 +212,12 @@ handle_request_set_cursor(struct wl_listener *listener, void *data)
 	 * actually has pointer focus first.
 	 */
 	if (focused_client == event->seat_client) {
+#if HAVE_ANDROID_EMBED
+		anlabwc_embed_set_cursor_shape(1);
+#endif
+		if (!seat->cursor_visible) {
+			return;
+		}
 		/*
 		 * Once we've vetted the client, we can tell the cursor to use
 		 * the provided surface as the cursor image. It will set the
@@ -217,14 +244,6 @@ handle_request_set_shape(struct wl_listener *listener, void *data)
 	}
 
 	/*
-	 * Omit set shape when the current cursor is
-	 * invisible, e.g. on touch input.
-	 */
-	if (!seat->cursor_visible) {
-		return;
-	}
-
-	/*
 	 * This can be sent by any client, so we check to make sure this one
 	 * actually has pointer focus first.
 	 */
@@ -241,6 +260,13 @@ handle_request_set_shape(struct wl_listener *listener, void *data)
 	if (tablet_tool_has_focused_surface(seat)
 			&& event->device_type
 				!= WLR_CURSOR_SHAPE_MANAGER_V1_DEVICE_TYPE_TABLET_TOOL) {
+		return;
+	}
+
+#if HAVE_ANDROID_EMBED
+	anlabwc_embed_set_cursor_shape((uint32_t)event->shape);
+#endif
+	if (!seat->cursor_visible) {
 		return;
 	}
 
@@ -381,6 +407,10 @@ void
 cursor_set(struct seat *seat, enum lab_cursors cursor)
 {
 	assert(cursor > LAB_CURSOR_CLIENT && cursor < LAB_CURSOR_COUNT);
+
+#if HAVE_ANDROID_EMBED
+	anlabwc_embed_set_cursor_shape(embed_shape_from_cursor(cursor));
+#endif
 
 	/* Prevent setting the same cursor image twice */
 	if (seat->server_cursor == cursor) {
