@@ -121,8 +121,16 @@ struct seat {
 
 	struct wl_listener request_set_cursor;
 	struct wl_listener request_set_shape;
+#if HAVE_ANDROID_EMBED
+	struct wlr_surface *embed_cursor_surface;
+	struct wl_listener embed_cursor_commit;
+	struct wl_listener embed_cursor_destroy;
+	int embed_cursor_hotspot_x;
+	int embed_cursor_hotspot_y;
+#endif
 	struct wl_listener request_set_selection;
 	struct wl_listener request_set_primary_selection;
+	struct wl_listener set_primary_selection;
 
 	struct wl_listener touch_down;
 	struct wl_listener touch_up;
@@ -469,6 +477,10 @@ void server_finish(void);
 #if HAVE_ANDROID_EMBED
 int anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data);
 void anlabwc_embed_set_cursor_shape(uint32_t shape);
+void anlabwc_embed_set_cursor_image(const uint32_t *pixels, int width,
+	int height, int hotspot_x, int hotspot_y);
+void anlabwc_embed_note_primary_selection(void);
+void anlabwc_embed_set_window_grab(bool active);
 #endif
 
 void create_constraint(struct wl_listener *listener, void *data);

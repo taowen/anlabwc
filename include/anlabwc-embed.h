@@ -32,6 +32,18 @@ ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
 ANLABWC_API int anlabwc_pointer_v2(int pointer_id, float x, float y,
 	int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);
+/*
+ * Copies the current client-provided cursor image as Android ARGB pixels.
+ * Returns the required pixel count, or zero when no custom image is active.
+ * Passing NULL/zero capacity only queries metadata and the required size.
+ */
+ANLABWC_API int anlabwc_cursor_image(uint32_t *pixels, int capacity,
+	int *width, int *height, int *hotspot_x, int *hotspot_y,
+	uint32_t *serial);
+/* Increments whenever the seat's primary text selection changes. */
+ANLABWC_API uint32_t anlabwc_primary_selection_serial(void);
+/* True while the compositor owns the pointer for window move or resize. */
+ANLABWC_API int anlabwc_window_grab_active(void);
 ANLABWC_API int anlabwc_axis(float dx, float dy);
 ANLABWC_API int anlabwc_key(int evdev, int pressed);
 /* UTF-32 codepoint. Looks up the current XKB map (US + Shift). */

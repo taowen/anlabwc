@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -94,18 +95,114 @@ static void window_request_release(struct window_request *request) {
 static char wayland_socket_path[512];
 static volatile bool running;
 static atomic_uint cursor_shape = 1;
+static atomic_uint primary_selection_serial;
+static atomic_bool window_grab_active;
+
+struct embed_cursor_image {
+	pthread_mutex_t lock;
+	uint32_t *pixels;
+	int width;
+	int height;
+	int hotspot_x;
+	int hotspot_y;
+	uint32_t serial;
+};
+
+static struct embed_cursor_image cursor_image = {
+	.lock = PTHREAD_MUTEX_INITIALIZER,
+};
+
+void
+anlabwc_embed_set_cursor_image(const uint32_t *pixels, int width, int height,
+		int hotspot_x, int hotspot_y)
+{
+	size_t count = pixels && width > 0 && height > 0
+		? (size_t)width * (size_t)height : 0;
+	uint32_t *copy = count ? malloc(count * sizeof(*copy)) : NULL;
+	if (count && !copy) {
+		return;
+	}
+	if (copy) {
+		memcpy(copy, pixels, count * sizeof(*copy));
+	}
+
+	pthread_mutex_lock(&cursor_image.lock);
+	free(cursor_image.pixels);
+	cursor_image.pixels = copy;
+	cursor_image.width = count ? width : 0;
+	cursor_image.height = count ? height : 0;
+	cursor_image.hotspot_x = hotspot_x;
+	cursor_image.hotspot_y = hotspot_y;
+	cursor_image.serial++;
+	pthread_mutex_unlock(&cursor_image.lock);
+}
 
 void
 anlabwc_embed_set_cursor_shape(uint32_t shape)
 {
-	atomic_store_explicit(&cursor_shape, shape > 0 ? shape : 1,
-		memory_order_relaxed);
+	atomic_store_explicit(&cursor_shape, shape, memory_order_relaxed);
+	anlabwc_embed_set_cursor_image(NULL, 0, 0, 0, 0);
 }
 
 ANLABWC_API int
 anlabwc_cursor_shape(void)
 {
 	return (int)atomic_load_explicit(&cursor_shape, memory_order_relaxed);
+}
+
+void
+anlabwc_embed_note_primary_selection(void)
+{
+	atomic_fetch_add_explicit(&primary_selection_serial, 1,
+		memory_order_relaxed);
+}
+
+ANLABWC_API uint32_t
+anlabwc_primary_selection_serial(void)
+{
+	return atomic_load_explicit(&primary_selection_serial,
+		memory_order_relaxed);
+}
+
+void
+anlabwc_embed_set_window_grab(bool active)
+{
+	atomic_store_explicit(&window_grab_active, active, memory_order_relaxed);
+}
+
+ANLABWC_API int
+anlabwc_window_grab_active(void)
+{
+	return atomic_load_explicit(&window_grab_active,
+		memory_order_relaxed) ? 1 : 0;
+}
+
+ANLABWC_API int
+anlabwc_cursor_image(uint32_t *pixels, int capacity, int *width, int *height,
+		int *hotspot_x, int *hotspot_y, uint32_t *serial)
+{
+	pthread_mutex_lock(&cursor_image.lock);
+	int count = cursor_image.width * cursor_image.height;
+	if (width) {
+		*width = cursor_image.width;
+	}
+	if (height) {
+		*height = cursor_image.height;
+	}
+	if (hotspot_x) {
+		*hotspot_x = cursor_image.hotspot_x;
+	}
+	if (hotspot_y) {
+		*hotspot_y = cursor_image.hotspot_y;
+	}
+	if (serial) {
+		*serial = cursor_image.serial;
+	}
+	if (pixels && capacity >= count && count > 0) {
+		memcpy(pixels, cursor_image.pixels, (size_t)count * sizeof(*pixels));
+	}
+	pthread_mutex_unlock(&cursor_image.lock);
+	return count;
 }
 
 #ifdef __ANDROID__

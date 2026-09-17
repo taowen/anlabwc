@@ -2,8 +2,12 @@
 #define _POSIX_C_SOURCE 200809L
 #include "input/cursor.h"
 #include <assert.h>
+#include <drm_fourcc.h>
 #include <time.h>
 #include <wlr/config.h>
+#include <wlr/render/wlr_texture.h>
+#include <wlr/types/wlr_buffer.h>
+#include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_cursor_shape_v1.h>
 #include <wlr/types/wlr_data_device.h>
@@ -176,6 +180,136 @@ get_toplevel(struct wlr_surface *surface)
 	return NULL;
 }
 
+#if HAVE_ANDROID_EMBED
+#define EMBED_CURSOR_MAX_DIMENSION 256
+
+static void
+embed_cursor_surface_disconnect(struct seat *seat)
+{
+	if (!seat->embed_cursor_surface) {
+		return;
+	}
+	wl_list_remove(&seat->embed_cursor_commit.link);
+	wl_list_remove(&seat->embed_cursor_destroy.link);
+	wl_list_init(&seat->embed_cursor_commit.link);
+	wl_list_init(&seat->embed_cursor_destroy.link);
+	seat->embed_cursor_surface = NULL;
+}
+
+static void
+embed_cursor_surface_capture(struct seat *seat)
+{
+	struct wlr_surface *surface = seat->embed_cursor_surface;
+	struct wlr_texture *texture = surface && surface->buffer
+		? surface->buffer->texture : NULL;
+	struct wlr_buffer *buffer = surface && surface->buffer
+		? &surface->buffer->base : NULL;
+	uint32_t width = buffer ? (uint32_t)buffer->width : 0;
+	uint32_t height = buffer ? (uint32_t)buffer->height : 0;
+	if (!buffer || width == 0 || height == 0
+			|| width > EMBED_CURSOR_MAX_DIMENSION
+			|| height > EMBED_CURSOR_MAX_DIMENSION) {
+		wlr_log(WLR_DEBUG, "embedded cursor has no readable texture");
+		anlabwc_embed_set_cursor_image(NULL, 0, 0, 0, 0);
+		return;
+	}
+
+	size_t count = (size_t)width * (size_t)height;
+	uint32_t *pixels = calloc(count, sizeof(*pixels));
+	if (!pixels) {
+		return;
+	}
+
+	bool copied = false;
+	void *source = NULL;
+	uint32_t format = DRM_FORMAT_INVALID;
+	size_t stride = 0;
+	if (wlr_buffer_begin_data_ptr_access(buffer,
+			WLR_BUFFER_DATA_PTR_ACCESS_READ, &source, &format, &stride)) {
+		if (format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_XRGB8888
+				|| format == DRM_FORMAT_ABGR8888
+				|| format == DRM_FORMAT_XBGR8888) {
+			for (uint32_t y = 0; y < height; y++) {
+				const uint32_t *row = (const uint32_t *)((const char *)source
+					+ y * stride);
+				for (uint32_t x = 0; x < width; x++) {
+					uint32_t pixel = row[x];
+					if (format == DRM_FORMAT_ABGR8888
+							|| format == DRM_FORMAT_XBGR8888) {
+						pixel = (pixel & 0xFF00FF00u)
+							| ((pixel & 0x00FF0000u) >> 16)
+							| ((pixel & 0x000000FFu) << 16);
+					}
+					if (format == DRM_FORMAT_XRGB8888
+							|| format == DRM_FORMAT_XBGR8888) {
+						pixel |= 0xFF000000u;
+					}
+					pixels[(size_t)y * width + x] = pixel;
+				}
+			}
+			copied = true;
+		}
+		wlr_buffer_end_data_ptr_access(buffer);
+	}
+
+	if (!copied && texture) {
+		struct wlr_texture_read_pixels_options options = {
+			.data = pixels,
+			.format = DRM_FORMAT_ARGB8888,
+			.stride = width * sizeof(*pixels),
+		};
+		copied = wlr_texture_read_pixels(texture, &options);
+	}
+	if (copied) {
+		wlr_log(WLR_DEBUG, "forward embedded cursor %ux%u hotspot %d,%d",
+			width, height,
+			seat->embed_cursor_hotspot_x, seat->embed_cursor_hotspot_y);
+		anlabwc_embed_set_cursor_image(pixels, (int)width,
+			(int)height, seat->embed_cursor_hotspot_x,
+			seat->embed_cursor_hotspot_y);
+	} else {
+		wlr_log(WLR_DEBUG, "failed to read embedded cursor texture %ux%u",
+			width, height);
+		anlabwc_embed_set_cursor_image(NULL, 0, 0, 0, 0);
+	}
+	free(pixels);
+}
+
+static void
+handle_embed_cursor_surface_commit(struct wl_listener *listener, void *data)
+{
+	(void)data;
+	struct seat *seat = wl_container_of(listener, seat, embed_cursor_commit);
+	embed_cursor_surface_capture(seat);
+}
+
+static void
+handle_embed_cursor_surface_destroy(struct wl_listener *listener, void *data)
+{
+	(void)data;
+	struct seat *seat = wl_container_of(listener, seat, embed_cursor_destroy);
+	embed_cursor_surface_disconnect(seat);
+	anlabwc_embed_set_cursor_shape(0);
+}
+
+static void
+embed_cursor_surface_set(struct seat *seat, struct wlr_surface *surface,
+		int hotspot_x, int hotspot_y)
+{
+	embed_cursor_surface_disconnect(seat);
+	seat->embed_cursor_hotspot_x = hotspot_x;
+	seat->embed_cursor_hotspot_y = hotspot_y;
+	seat->embed_cursor_surface = surface;
+	if (!surface) {
+		anlabwc_embed_set_cursor_shape(0);
+		return;
+	}
+	wl_signal_add(&surface->events.commit, &seat->embed_cursor_commit);
+	wl_signal_add(&surface->events.destroy, &seat->embed_cursor_destroy);
+	embed_cursor_surface_capture(seat);
+}
+#endif
+
 static void
 handle_request_set_cursor(struct wl_listener *listener, void *data)
 {
@@ -213,7 +347,9 @@ handle_request_set_cursor(struct wl_listener *listener, void *data)
 	 */
 	if (focused_client == event->seat_client) {
 #if HAVE_ANDROID_EMBED
-		anlabwc_embed_set_cursor_shape(1);
+		anlabwc_embed_set_cursor_shape(event->surface ? 1 : 0);
+		embed_cursor_surface_set(seat, event->surface,
+			event->hotspot_x, event->hotspot_y);
 #endif
 		if (!seat->cursor_visible) {
 			return;
@@ -264,6 +400,7 @@ handle_request_set_shape(struct wl_listener *listener, void *data)
 	}
 
 #if HAVE_ANDROID_EMBED
+	embed_cursor_surface_disconnect(seat);
 	anlabwc_embed_set_cursor_shape((uint32_t)event->shape);
 #endif
 	if (!seat->cursor_visible) {
@@ -293,6 +430,19 @@ handle_request_set_primary_selection(struct wl_listener *listener, void *data)
 	wlr_seat_set_primary_selection(seat->wlr_seat, event->source,
 		event->serial);
 }
+
+#if HAVE_ANDROID_EMBED
+static void
+handle_set_primary_selection(struct wl_listener *listener, void *data)
+{
+	(void)data;
+	struct seat *seat = wl_container_of(
+		listener, seat, set_primary_selection);
+	(void)seat;
+	anlabwc_embed_note_primary_selection();
+	wlr_log(WLR_DEBUG, "embedded primary selection changed");
+}
+#endif
 
 static void
 process_cursor_move(uint32_t time)
@@ -409,6 +559,7 @@ cursor_set(struct seat *seat, enum lab_cursors cursor)
 	assert(cursor > LAB_CURSOR_CLIENT && cursor < LAB_CURSOR_COUNT);
 
 #if HAVE_ANDROID_EMBED
+	embed_cursor_surface_disconnect(seat);
 	anlabwc_embed_set_cursor_shape(embed_shape_from_cursor(cursor));
 #endif
 
@@ -1651,6 +1802,12 @@ cursor_reload(struct seat *seat)
 void
 cursor_init(struct seat *seat)
 {
+#if HAVE_ANDROID_EMBED
+	wl_list_init(&seat->embed_cursor_commit.link);
+	wl_list_init(&seat->embed_cursor_destroy.link);
+	seat->embed_cursor_commit.notify = handle_embed_cursor_surface_commit;
+	seat->embed_cursor_destroy.notify = handle_embed_cursor_surface_destroy;
+#endif
 	cursor_load(seat);
 
 	/* Set the initial cursor image so the cursor is visible right away */
@@ -1681,10 +1838,16 @@ cursor_init(struct seat *seat)
 	CONNECT_SIGNAL(cursor_shape_manager, seat, request_set_shape);
 	CONNECT_SIGNAL(seat->wlr_seat, seat, request_set_selection);
 	CONNECT_SIGNAL(seat->wlr_seat, seat, request_set_primary_selection);
+#if HAVE_ANDROID_EMBED
+	CONNECT_SIGNAL(seat->wlr_seat, seat, set_primary_selection);
+#endif
 }
 
 void cursor_finish(struct seat *seat)
 {
+#if HAVE_ANDROID_EMBED
+	embed_cursor_surface_disconnect(seat);
+#endif
 	wl_list_remove(&seat->on_cursor.motion.link);
 	wl_list_remove(&seat->on_cursor.motion_absolute.link);
 	wl_list_remove(&seat->on_cursor.button.link);
@@ -1700,6 +1863,9 @@ void cursor_finish(struct seat *seat)
 	wl_list_remove(&seat->request_set_shape.link);
 	wl_list_remove(&seat->request_set_selection.link);
 	wl_list_remove(&seat->request_set_primary_selection.link);
+#if HAVE_ANDROID_EMBED
+	wl_list_remove(&seat->set_primary_selection.link);
+#endif
 
 	wlr_xcursor_manager_destroy(seat->xcursor_manager);
 	wlr_cursor_destroy(seat->cursor);

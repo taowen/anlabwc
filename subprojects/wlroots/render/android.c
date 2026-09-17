@@ -161,9 +161,70 @@ static bool texture_update(struct wlr_texture *base, struct wlr_buffer *buffer,
 	return make_current(t->renderer) && upload_shm(t, buffer);
 }
 
+static bool texture_read_pixels(struct wlr_texture *base,
+		const struct wlr_texture_read_pixels_options *options) {
+	struct android_texture *t = wl_container_of(base, t, base);
+	if (t->target != GL_TEXTURE_2D || options->format != DRM_FORMAT_ARGB8888
+			|| !make_current(t->renderer)) {
+		return false;
+	}
+	struct wlr_box src;
+	wlr_texture_read_pixels_options_get_src_box(options, base, &src);
+	if (src.x < 0 || src.y < 0 || src.width <= 0 || src.height <= 0
+			|| src.x + src.width > (int)base->width
+			|| src.y + src.height > (int)base->height
+			|| options->stride < (options->dst_x + (uint32_t)src.width) * 4) {
+		return false;
+	}
+	uint32_t *scratch = malloc((size_t)src.width * sizeof(*scratch));
+	if (!scratch) {
+		return false;
+	}
+	GLint previous_fbo = 0;
+	GLuint framebuffer = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_fbo);
+	glGenFramebuffers(1, &framebuffer);
+	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+		GL_TEXTURE_2D, t->name, 0);
+	bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER)
+		== GL_FRAMEBUFFER_COMPLETE;
+	uint32_t *dst = wlr_texture_read_pixel_options_get_data(options);
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	for (int y = 0; ok && y < src.height; y++) {
+		glReadPixels(src.x, src.y + y, src.width, 1,
+			GL_RGBA, GL_UNSIGNED_BYTE, scratch);
+		ok = glGetError() == GL_NO_ERROR;
+		uint32_t *row = (uint32_t *)((char *)dst + (size_t)y * options->stride);
+		for (int x = 0; ok && x < src.width; x++) {
+			uint32_t pixel = scratch[x];
+			if (!t->swizzle) {
+				pixel = (pixel & 0xFF00FF00u)
+					| ((pixel & 0x00FF0000u) >> 16)
+					| ((pixel & 0x000000FFu) << 16);
+			}
+			if (t->opaque) {
+				pixel |= 0xFF000000u;
+			}
+			row[x] = pixel;
+		}
+	}
+	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)previous_fbo);
+	glDeleteFramebuffers(1, &framebuffer);
+	free(scratch);
+	return ok;
+}
+
+static uint32_t texture_preferred_read_format(struct wlr_texture *base) {
+	(void)base;
+	return DRM_FORMAT_ARGB8888;
+}
+
 static const struct wlr_texture_impl texture_impl = {
 	.destroy = texture_destroy,
 	.update_from_buffer = texture_update,
+	.read_pixels = texture_read_pixels,
+	.preferred_read_format = texture_preferred_read_format,
 };
 
 static struct android_texture *import_texture(struct android_renderer *r,
