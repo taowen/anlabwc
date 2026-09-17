@@ -978,7 +978,9 @@ handle_motion_absolute(struct wl_listener *listener, void *data)
 	struct seat *seat = wl_container_of(listener, seat, on_cursor.motion_absolute);
 	struct wlr_pointer_motion_absolute_event *event = data;
 	idle_manager_notify_activity(seat->wlr_seat);
-	cursor_set_visible(seat, /* visible */ true);
+	if (strcmp(event->pointer->base.name, "anlabwc-android-pointer")) {
+		cursor_set_visible(seat, /* visible */ true);
+	}
 
 	double lx, ly;
 	wlr_cursor_absolute_to_layout_coords(seat->cursor,
@@ -1293,7 +1295,9 @@ handle_button(struct wl_listener *listener, void *data)
 	struct seat *seat = wl_container_of(listener, seat, on_cursor.button);
 	struct wlr_pointer_button_event *event = data;
 	idle_manager_notify_activity(seat->wlr_seat);
-	cursor_set_visible(seat, /* visible */ true);
+	if (strcmp(event->pointer->base.name, "anlabwc-android-pointer")) {
+		cursor_set_visible(seat, /* visible */ true);
+	}
 
 	bool notify;
 	switch (event->state) {
@@ -1439,7 +1443,9 @@ handle_axis(struct wl_listener *listener, void *data)
 	struct seat *seat = wl_container_of(listener, seat, on_cursor.axis);
 	struct wlr_pointer_axis_event *event = data;
 	idle_manager_notify_activity(seat->wlr_seat);
-	cursor_set_visible(seat, /* visible */ true);
+	if (strcmp(event->pointer->base.name, "anlabwc-android-pointer")) {
+		cursor_set_visible(seat, /* visible */ true);
+	}
 
 	/* input->scroll_factor is set for pointer/touch devices */
 	assert(event->pointer->base.type == WLR_INPUT_DEVICE_POINTER

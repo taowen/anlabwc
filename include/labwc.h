@@ -172,6 +172,8 @@ struct server {
 		int input_rd;
 		int input_wr;
 		struct wl_event_source *input_source;
+		struct wlr_cursor *hand_cursors[2];
+		int active_hand;
 	} embed;
 #endif
 	struct wlr_session *session;

@@ -53,6 +53,7 @@ enum {
 
 struct embed_msg {
 	uint32_t type;
+	uint32_t pointer_id;
 	uint32_t button;
 	uint32_t keycode;
 	int32_t pressed;
@@ -60,6 +61,64 @@ struct embed_msg {
 	float y;
 	uintptr_t request;
 };
+
+#define EMBED_HAND_COUNT 2
+#define EMBED_RIGHT_HAND 0
+
+static void
+embed_hand_cursors_init(void)
+{
+	static const char *const shapes[EMBED_HAND_COUNT] = {
+		"left_ptr", "hand1",
+	};
+	static const double x_factors[EMBED_HAND_COUNT] = {0.75, 0.25};
+
+	if (server.embed.hand_cursors[0] || !server.output_layout
+			|| !server.seat.xcursor_manager) {
+		return;
+	}
+	for (int i = 0; i < EMBED_HAND_COUNT; ++i) {
+		struct wlr_cursor *cursor = wlr_cursor_create();
+		if (!cursor) {
+			continue;
+		}
+		server.embed.hand_cursors[i] = cursor;
+		wlr_cursor_attach_output_layout(cursor, server.output_layout);
+		wlr_cursor_warp(cursor, NULL, server.embed.width * x_factors[i],
+			server.embed.height * 0.5);
+		wlr_cursor_set_xcursor(cursor, server.seat.xcursor_manager, shapes[i]);
+	}
+	server.embed.active_hand = EMBED_RIGHT_HAND;
+	cursor_set_visible(&server.seat, false);
+}
+
+static void
+embed_hand_cursors_finish(void)
+{
+	for (int i = 0; i < EMBED_HAND_COUNT; ++i) {
+		if (server.embed.hand_cursors[i]) {
+			wlr_cursor_destroy(server.embed.hand_cursors[i]);
+			server.embed.hand_cursors[i] = NULL;
+		}
+	}
+}
+
+static uint32_t
+embed_pointer_id(uint32_t pointer_id)
+{
+	return pointer_id < EMBED_HAND_COUNT ? pointer_id : EMBED_RIGHT_HAND;
+}
+
+static void
+embed_move_hand_cursor(uint32_t pointer_id, double x, double y)
+{
+	pointer_id = embed_pointer_id(pointer_id);
+	embed_hand_cursors_init();
+	server.embed.active_hand = (int)pointer_id;
+	if (server.embed.hand_cursors[pointer_id]) {
+		wlr_cursor_warp(server.embed.hand_cursors[pointer_id], NULL, x, y);
+	}
+}
 
 struct window_request {
 	struct ANativeWindow *window;
@@ -197,9 +256,12 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 	}
 	switch (msg.type) {
 	case EMBED_PTR_MOTION:
+		embed_move_hand_cursor(msg.pointer_id, msg.x, msg.y);
 		wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);
+		cursor_set_visible(&server.seat, false);
 		break;
 	case EMBED_PTR_BUTTON:
+		embed_move_hand_cursor(msg.pointer_id, msg.x, msg.y);
 		/* A synthetic motion on release starts titlebar drag bindings even
 		 * when the finger did not move, consuming an ordinary button click.
 		 * Compare against the seat so virtual-pointer motion is also honored.
@@ -210,6 +272,7 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		}
 		wlr_android_pointer_button(server.embed.android, msg.button,
 			msg.pressed != 0);
+		cursor_set_visible(&server.seat, false);
 		break;
 	case EMBED_KEY:
 		wlr_android_keyboard_key(server.embed.android, msg.keycode,
@@ -238,8 +301,15 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 ANLABWC_API int
 anlabwc_pointer(float x, float y, int button, int pressed)
 {
+	return anlabwc_pointer_v2(EMBED_RIGHT_HAND, x, y, button, pressed);
+}
+
+ANLABWC_API int
+anlabwc_pointer_v2(int pointer_id, float x, float y, int button, int pressed)
+{
 	struct embed_msg msg = {
 		.type = pressed < 0 ? EMBED_PTR_MOTION : EMBED_PTR_BUTTON,
+		.pointer_id = embed_pointer_id((uint32_t)pointer_id),
 		.button = button > 0 ? (uint32_t)button : 0x110u,
 		.pressed = pressed,
 		.x = x,
@@ -504,6 +574,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	increase_nofile_limit();
 	server_init();
 	server_start();
+	embed_hand_cursors_init();
 
 	struct theme theme = { 0 };
 	theme_init(&theme, rc.theme_name);
@@ -520,6 +591,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	theme_finish(&theme);
 	rcxml_finish();
 	font_finish();
+	embed_hand_cursors_finish();
 	server_finish();
 
 	if (server.embed.input_rd >= 0) {
