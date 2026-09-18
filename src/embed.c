@@ -50,7 +50,10 @@ enum {
 	EMBED_WINDOW,
 };
 
+#define EVDEV_LEFTCTRL 29u
 #define EVDEV_LEFTSHIFT 42u
+#define EVDEV_SPACE 57u
+#define EVDEV_U 22u
 
 struct embed_msg {
 	uint32_t type;
@@ -238,6 +241,69 @@ embed_send_key(uint32_t evdev, bool pressed)
 	wlr_android_keyboard_key(server.embed.android, evdev, pressed);
 }
 
+static void
+embed_tap_key(uint32_t evdev)
+{
+	embed_send_key(evdev, true);
+	embed_send_key(evdev, false);
+}
+
+static uint32_t
+embed_hex_key(unsigned int digit)
+{
+	static const uint32_t letter_keys[] = { 30, 48, 46, 32, 18, 33 };
+
+	if (digit < 10) {
+		return digit == 0 ? 11 : digit + 1;
+	}
+	return digit < 16 ? letter_keys[digit - 10] : 0;
+}
+
+/*
+ * Fcitx's Unicode addon accepts Ctrl+Shift+U, hexadecimal digits, Space.
+ * This is the text transport for codepoints absent from the physical keymap;
+ * the Android IME remains responsible for composition and candidate choice.
+ */
+static void
+embed_send_fcitx_unicode(struct wlr_keyboard *kb, uint32_t codepoint)
+{
+	char hex[9];
+	int length = snprintf(hex, sizeof(hex), "%x", codepoint);
+	xkb_mod_index_t ctrl_idx = xkb_keymap_mod_get_index(
+		kb->keymap, XKB_MOD_NAME_CTRL);
+	xkb_mod_index_t shift_idx = xkb_keymap_mod_get_index(
+		kb->keymap, XKB_MOD_NAME_SHIFT);
+	bool ctrl_down = ctrl_idx != XKB_MOD_INVALID
+		&& xkb_state_mod_index_is_active(kb->xkb_state, ctrl_idx,
+			XKB_STATE_MODS_DEPRESSED);
+	bool shift_down = shift_idx != XKB_MOD_INVALID
+		&& xkb_state_mod_index_is_active(kb->xkb_state, shift_idx,
+			XKB_STATE_MODS_DEPRESSED);
+
+	if (!ctrl_down) {
+		embed_send_key(EVDEV_LEFTCTRL, true);
+	}
+	if (!shift_down) {
+		embed_send_key(EVDEV_LEFTSHIFT, true);
+	}
+	embed_tap_key(EVDEV_U);
+	embed_send_key(EVDEV_LEFTSHIFT, false);
+	embed_send_key(EVDEV_LEFTCTRL, false);
+	for (int i = 0; i < length; i++) {
+		unsigned int digit = hex[i] <= '9'
+			? (unsigned int)(hex[i] - '0')
+			: (unsigned int)(hex[i] - 'a' + 10);
+		embed_tap_key(embed_hex_key(digit));
+	}
+	embed_tap_key(EVDEV_SPACE);
+	if (ctrl_down) {
+		embed_send_key(EVDEV_LEFTCTRL, true);
+	}
+	if (shift_down) {
+		embed_send_key(EVDEV_LEFTSHIFT, true);
+	}
+}
+
 /*
  * Map a Unicode codepoint onto the current XKB layout (level 0 or Shift).
  * IME ASCII/punctuation lives here; CJK is typically not in the US map.
@@ -290,8 +356,9 @@ embed_send_unicode(uint32_t codepoint)
 	}
 found:
 	if (found_evdev <= 0) {
-		wlr_log(WLR_DEBUG, "embed unicode U+%04X not in keymap",
+		wlr_log(WLR_DEBUG, "embed unicode U+%04X through Fcitx",
 			codepoint);
+		embed_send_fcitx_unicode(kb, codepoint);
 		return;
 	}
 	shift_idx = xkb_keymap_mod_get_index(keymap, XKB_MOD_NAME_SHIFT);
