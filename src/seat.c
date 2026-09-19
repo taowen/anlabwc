@@ -434,15 +434,17 @@ new_keyboard(struct seat *seat, struct wlr_input_device *device, bool is_virtual
 		exit(EXIT_FAILURE);
 	}
 
-	wlr_keyboard_set_keymap(kb, seat->keyboard_group->keyboard.keymap);
+	if (!is_virtual) {
+		wlr_keyboard_set_keymap(kb, seat->keyboard_group->keyboard.keymap);
 
-	/*
-	 * This needs to be before wlr_keyboard_group_add_keyboard().
-	 * For some reason, wlroots takes the modifier state from the
-	 * new keyboard and syncs it to the others in the group, rather
-	 * than the other way around.
-	 */
-	keyboard_set_numlock(kb);
+		/*
+		 * This needs to be before wlr_keyboard_group_add_keyboard().
+		 * For some reason, wlroots takes the modifier state from the
+		 * new keyboard and syncs it to the others in the group, rather
+		 * than the other way around.
+		 */
+		keyboard_set_numlock(kb);
+	}
 
 	if (is_virtual) {
 		/* key repeat information is usually synchronized via the keyboard group */
@@ -453,7 +455,17 @@ new_keyboard(struct seat *seat, struct wlr_input_device *device, bool is_virtual
 
 	keyboard_setup_handlers(keyboard);
 
-	wlr_seat_set_keyboard(seat->wlr_seat, kb);
+	/*
+	 * A virtual-keyboard client uploads its own keymap after creating the
+	 * device.  Selecting it here publishes a stale seat keymap before that
+	 * upload arrives.  Clients can then decode wtype's compact
+	 * keycodes with the stale physical layout ("abc" becomes "12").
+	 * handle_key() selects the keyboard again immediately before forwarding
+	 * its first event, after the protocol keymap request has been processed.
+	 */
+	if (!is_virtual) {
+		wlr_seat_set_keyboard(seat->wlr_seat, kb);
+	}
 
 	return (struct input *)keyboard;
 }
