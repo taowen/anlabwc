@@ -1324,6 +1324,11 @@ cursor_process_button_press(struct seat *seat, uint32_t button, uint32_t time_ms
 {
 	struct cursor_context ctx = get_cursor_context();
 
+#if HAVE_ANDROID_EMBED
+	anlabwc_embed_set_window_transform_ready(button == 0x110
+		&& (ctx.type == LAB_NODE_TITLEBAR || ctx.type == LAB_NODE_TITLE));
+#endif
+
 	/* Used on next button release to check if it can close menu or select menu item */
 	press_msec = time_msec;
 
@@ -1398,6 +1403,10 @@ cursor_process_button_release(struct seat *seat, uint32_t button,
 
 	/* Always notify button release event when it's not bound */
 	const bool notify = !lab_set_contains(&seat->bound_buttons, button);
+
+#if HAVE_ANDROID_EMBED
+	anlabwc_embed_set_window_transform_ready(false);
+#endif
 
 	cursor_context_save(&seat->pressed, NULL);
 

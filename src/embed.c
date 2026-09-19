@@ -32,9 +32,11 @@
 #include "common/string-helpers.h"
 #include "config/rcxml.h"
 #include "config/session.h"
+#include "input/cursor.h"
 #include "labwc.h"
 #include "menu/menu.h"
 #include "theme.h"
+#include "view.h"
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -48,6 +50,8 @@ enum {
 	EMBED_AXIS,
 	EMBED_UNICODE,
 	EMBED_WINDOW,
+	EMBED_WINDOW_RESIZE_SHAPE,
+	EMBED_WINDOW_TRANSFORM,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -63,6 +67,8 @@ struct embed_msg {
 	int32_t pressed;
 	float x;
 	float y;
+	float x2;
+	float y2;
 	uintptr_t request;
 };
 
@@ -88,9 +94,25 @@ struct window_request {
 	atomic_int refs;
 };
 
+struct transform_request {
+	int result;
+	sem_t done;
+	atomic_int refs;
+};
+
 static void window_request_release(struct window_request *request) {
 	if (atomic_fetch_sub(&request->refs, 1) != 1) return;
 	if (request->window) ANativeWindow_release(request->window);
+	sem_destroy(&request->done);
+	free(request);
+}
+
+static void
+transform_request_release(struct transform_request *request)
+{
+	if (atomic_fetch_sub(&request->refs, 1) != 1) {
+		return;
+	}
 	sem_destroy(&request->done);
 	free(request);
 }
@@ -99,7 +121,21 @@ static char wayland_socket_path[512];
 static volatile bool running;
 static atomic_uint cursor_shape = 1;
 static atomic_uint primary_selection_serial;
-static atomic_bool window_grab_active;
+static atomic_int window_grab_mode;
+static atomic_bool window_transform_ready;
+
+struct embed_window_transform {
+	bool active;
+	struct view *view;
+	struct wlr_box initial_box;
+	enum lab_edge edges;
+	double initial_anchor_x;
+	double initial_anchor_y;
+	double initial_focus_x;
+	double initial_focus_y;
+};
+
+static struct embed_window_transform window_transform;
 
 struct embed_cursor_image {
 	pthread_mutex_t lock;
@@ -168,16 +204,161 @@ anlabwc_primary_selection_serial(void)
 }
 
 void
-anlabwc_embed_set_window_grab(bool active)
+anlabwc_embed_set_window_grab(int mode)
 {
-	atomic_store_explicit(&window_grab_active, active, memory_order_relaxed);
+	atomic_store_explicit(&window_grab_mode, mode, memory_order_relaxed);
+	if (!mode) {
+		window_transform.active = false;
+		window_transform.view = NULL;
+	}
+}
+
+void
+anlabwc_embed_set_window_transform_ready(bool ready)
+{
+	atomic_store_explicit(&window_transform_ready, ready,
+		memory_order_relaxed);
 }
 
 ANLABWC_API int
 anlabwc_window_grab_active(void)
 {
-	return atomic_load_explicit(&window_grab_active,
-		memory_order_relaxed) ? 1 : 0;
+	return atomic_load_explicit(&window_grab_mode,
+		memory_order_relaxed) != 0;
+}
+
+ANLABWC_API int
+anlabwc_window_grab_mode(void)
+{
+	int mode = atomic_load_explicit(&window_grab_mode, memory_order_relaxed);
+	return mode ? mode
+		: atomic_load_explicit(&window_transform_ready,
+			memory_order_relaxed) ? 1 : 0;
+}
+
+static bool
+embed_window_transform_begin(float anchor_x, float anchor_y,
+	float focus_x, float focus_y)
+{
+	struct view *view = server.grabbed_view;
+	struct cursor_context focus = get_cursor_context_at(focus_x, focus_y);
+	enum lab_edge edges = node_type_to_edges(focus.type);
+	if (!view || focus.view != view || !edges) {
+		return false;
+	}
+	if (server.input_mode == LAB_INPUT_STATE_PASSTHROUGH
+			&& atomic_load_explicit(&window_transform_ready,
+				memory_order_relaxed)
+			&& server.grabbed_view == view) {
+		interactive_begin(view, LAB_INPUT_STATE_MOVE,
+			LAB_EDGE_NONE);
+	}
+	if (server.input_mode != LAB_INPUT_STATE_MOVE
+			|| server.grabbed_view != view) {
+		return false;
+	}
+	struct wlr_box box = view->current;
+	if (box.width <= 0 || box.height <= 0) {
+		return false;
+	}
+	window_transform.active = true;
+	window_transform.view = view;
+	window_transform.initial_box = box;
+	window_transform.edges = edges;
+	window_transform.initial_anchor_x = anchor_x;
+	window_transform.initial_anchor_y = anchor_y;
+	window_transform.initial_focus_x = focus_x;
+	window_transform.initial_focus_y = focus_y;
+	return true;
+}
+
+static int
+embed_resize_shape_at(float x, float y)
+{
+	struct view *view = server.grabbed_view;
+	if (!view || (server.input_mode != LAB_INPUT_STATE_MOVE
+			&& !atomic_load_explicit(&window_transform_ready,
+				memory_order_relaxed))) {
+		return 1;
+	}
+	struct cursor_context focus = get_cursor_context_at(x, y);
+	if (focus.view != view) {
+		return 1;
+	}
+	switch (cursor_get_from_edge(node_type_to_edges(focus.type))) {
+	case LAB_CURSOR_RESIZE_NW:
+		return 21;
+	case LAB_CURSOR_RESIZE_N:
+		return 19;
+	case LAB_CURSOR_RESIZE_NE:
+		return 20;
+	case LAB_CURSOR_RESIZE_E:
+		return 18;
+	case LAB_CURSOR_RESIZE_SE:
+		return 23;
+	case LAB_CURSOR_RESIZE_S:
+		return 22;
+	case LAB_CURSOR_RESIZE_SW:
+		return 24;
+	case LAB_CURSOR_RESIZE_W:
+		return 25;
+	default:
+		return 1;
+	}
+}
+
+static void
+embed_window_transform_update(float anchor_x, float anchor_y,
+	float focus_x, float focus_y)
+{
+	if (!window_transform.active
+			|| server.input_mode != LAB_INPUT_STATE_MOVE
+			|| server.grabbed_view != window_transform.view) {
+		window_transform.active = false;
+		window_transform.view = NULL;
+		return;
+	}
+	double anchor_dx = anchor_x - window_transform.initial_anchor_x;
+	double anchor_dy = anchor_y - window_transform.initial_anchor_y;
+	double resize_dx = focus_x - window_transform.initial_focus_x - anchor_dx;
+	double resize_dy = focus_y - window_transform.initial_focus_y - anchor_dy;
+	struct wlr_box initial = window_transform.initial_box;
+	struct wlr_box box = initial;
+	box.x += lround(anchor_dx);
+	box.y += lround(anchor_dy);
+	if (window_transform.edges & LAB_EDGE_LEFT) {
+		box.width = lround(initial.width - resize_dx);
+	} else if (window_transform.edges & LAB_EDGE_RIGHT) {
+		box.width = lround(initial.width + resize_dx);
+	}
+	if (window_transform.edges & LAB_EDGE_TOP) {
+		box.height = lround(initial.height - resize_dy);
+	} else if (window_transform.edges & LAB_EDGE_BOTTOM) {
+		box.height = lround(initial.height + resize_dy);
+	}
+	view_adjust_size(window_transform.view, &box.width, &box.height);
+	if (window_transform.edges & LAB_EDGE_LEFT) {
+		box.x = lround(initial.x + anchor_dx + initial.width - box.width);
+	}
+	if (window_transform.edges & LAB_EDGE_TOP) {
+		box.y = lround(initial.y + anchor_dy + initial.height - box.height);
+	}
+	view_move_resize(window_transform.view, box);
+
+	/* Keep the ordinary move grab continuous. When either hand releases,
+	 * its synthetic pointer-up first moves the seat to the anchor. Updating
+	 * this context prevents that final motion from jumping the window. */
+	server.grab_box = box;
+	server.grab_x = anchor_x;
+	server.grab_y = anchor_y;
+	overlay_update(&server.seat);
+}
+
+static void
+embed_window_transform_end(void)
+{
+	window_transform.active = false;
+	window_transform.view = NULL;
 }
 
 ANLABWC_API int
@@ -425,6 +606,35 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		window_request_release(request);
 		break;
 	}
+	case EMBED_WINDOW_RESIZE_SHAPE: {
+		struct transform_request *request =
+			(struct transform_request *)msg.request;
+		request->result = embed_resize_shape_at(msg.x, msg.y);
+		sem_post(&request->done);
+		transform_request_release(request);
+		break;
+	}
+	case EMBED_WINDOW_TRANSFORM:
+		switch (msg.pressed) {
+		case 1: {
+			struct transform_request *request =
+				(struct transform_request *)msg.request;
+			request->result = embed_window_transform_begin(
+				msg.x, msg.y, msg.x2, msg.y2) ? 0 : -1;
+			sem_post(&request->done);
+			transform_request_release(request);
+			break;
+		}
+		case 2:
+			embed_window_transform_update(msg.x, msg.y, msg.x2, msg.y2);
+			break;
+		case 3:
+			embed_window_transform_end();
+			break;
+		default:
+			break;
+		}
+		break;
 	default:
 		break;
 	}
@@ -449,6 +659,88 @@ anlabwc_pointer_v2(int pointer_id, float x, float y, int button, int pressed)
 		.y = y,
 	};
 	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_window_resize_shape(float x, float y)
+{
+	struct transform_request *request = calloc(1, sizeof(*request));
+	if (!request || sem_init(&request->done, 0, 0) != 0) {
+		free(request);
+		return 1;
+	}
+	atomic_init(&request->refs, 2);
+	struct embed_msg msg = {
+		.type = EMBED_WINDOW_RESIZE_SHAPE,
+		.x = x,
+		.y = y,
+		.request = (uintptr_t)request,
+	};
+	int result = 1;
+	if (send_msg(&msg) == 0) {
+		struct timespec deadline;
+		clock_gettime(CLOCK_REALTIME, &deadline);
+		deadline.tv_nsec += 100 * 1000 * 1000;
+		if (deadline.tv_nsec >= 1000 * 1000 * 1000) {
+			deadline.tv_sec++;
+			deadline.tv_nsec -= 1000 * 1000 * 1000;
+		}
+		int rc;
+		do {
+			rc = sem_timedwait(&request->done, &deadline);
+		} while (rc < 0 && errno == EINTR);
+		if (rc == 0) {
+			result = request->result;
+		}
+	} else {
+		transform_request_release(request);
+	}
+	transform_request_release(request);
+	return result;
+}
+
+ANLABWC_API int
+anlabwc_window_transform(int action, float anchor_x, float anchor_y,
+	float focus_x, float focus_y)
+{
+	if (action < 1 || action > 3) {
+		return -1;
+	}
+	struct embed_msg msg = {
+		.type = EMBED_WINDOW_TRANSFORM,
+		.pressed = action,
+		.x = anchor_x,
+		.y = anchor_y,
+		.x2 = focus_x,
+		.y2 = focus_y,
+	};
+	if (action != 1) {
+		return send_msg(&msg);
+	}
+	struct transform_request *request = calloc(1, sizeof(*request));
+	if (!request || sem_init(&request->done, 0, 0) != 0) {
+		free(request);
+		return -1;
+	}
+	atomic_init(&request->refs, 2);
+	msg.request = (uintptr_t)request;
+	int result = -1;
+	if (send_msg(&msg) == 0) {
+		struct timespec deadline;
+		clock_gettime(CLOCK_REALTIME, &deadline);
+		deadline.tv_sec += 1;
+		int rc;
+		do {
+			rc = sem_timedwait(&request->done, &deadline);
+		} while (rc < 0 && errno == EINTR);
+		if (rc == 0) {
+			result = request->result;
+		}
+	} else {
+		transform_request_release(request);
+	}
+	transform_request_release(request);
+	return result;
 }
 
 ANLABWC_API int

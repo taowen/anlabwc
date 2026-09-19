@@ -44,6 +44,13 @@ ANLABWC_API int anlabwc_cursor_image(uint32_t *pixels, int capacity,
 ANLABWC_API uint32_t anlabwc_primary_selection_serial(void);
 /* True while the compositor owns the pointer for window move or resize. */
 ANLABWC_API int anlabwc_window_grab_active(void);
+/* 0=none, 1=move, 2=resize. Mirrors the compositor input mode. */
+ANLABWC_API int anlabwc_window_grab_mode(void);
+/* Cursor shape for resizing the currently grabbed window at (x, y), or 1. */
+ANLABWC_API int anlabwc_window_resize_shape(float x, float y);
+/* action: 1=begin, 2=update, 3=end. Coordinates are compositor pixels. */
+ANLABWC_API int anlabwc_window_transform(int action, float anchor_x,
+	float anchor_y, float focus_x, float focus_y);
 ANLABWC_API int anlabwc_axis(float dx, float dy);
 ANLABWC_API int anlabwc_key(int evdev, int pressed);
 /* UTF-32 codepoint. Looks up the current XKB map (US + Shift). */

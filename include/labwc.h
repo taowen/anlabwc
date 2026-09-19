@@ -480,7 +480,8 @@ void anlabwc_embed_set_cursor_shape(uint32_t shape);
 void anlabwc_embed_set_cursor_image(const uint32_t *pixels, int width,
 	int height, int hotspot_x, int hotspot_y);
 void anlabwc_embed_note_primary_selection(void);
-void anlabwc_embed_set_window_grab(bool active);
+void anlabwc_embed_set_window_grab(int mode);
+void anlabwc_embed_set_window_transform_ready(bool ready);
 #endif
 
 void create_constraint(struct wl_listener *listener, void *data);

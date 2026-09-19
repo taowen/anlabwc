@@ -64,6 +64,10 @@ struct cursor_context_saved {
  */
 struct cursor_context get_cursor_context(void);
 
+/* Find the cursor context at arbitrary layout coordinates without moving the
+ * seat cursor. Used by Android's independently rendered second pointer. */
+struct cursor_context get_cursor_context_at(double lx, double ly);
+
 /**
  * cursor_set - set cursor icon
  * @seat - current seat
