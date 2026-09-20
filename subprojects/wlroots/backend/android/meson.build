@@ -10,11 +10,10 @@ gles_dep = dependency('glesv2', required: false)
 if not gles_dep.found()
 	gles_dep = cc.find_library('GLESv2', required: true)
 endif
-wlr_deps += [android_dep, egl_dep, gles_dep, cc.find_library('vulkan', required: true)]
+wlr_deps += [android_dep, egl_dep, gles_dep]
 
 wlr_files += files(
 	'backend.c',
 	'output.c',
 	'../../render/android.c',
-	'../../render/android_dmabuf.c',
 )
