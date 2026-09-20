@@ -804,7 +804,7 @@ server_init(void)
 		wlr_log(WLR_ERROR, "unable to create presentation interface");
 		exit(EXIT_FAILURE);
 	}
-	if (server.linux_dmabuf) {
+	if (server.linux_dmabuf && wl_global_get_version(server.linux_dmabuf->global) >= 4) {
 		wlr_scene_set_linux_dmabuf_v1(server.scene, server.linux_dmabuf);
 	}
 

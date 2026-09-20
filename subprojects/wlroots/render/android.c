@@ -6,6 +6,9 @@
 #define EGL_EGLEXT_PROTOTYPES
 #define GL_GLEXT_PROTOTYPES
 #include <assert.h>
+#include <limits.h>
+#include <inttypes.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <drm_fourcc.h>
@@ -23,6 +26,7 @@
 #include <wlr/util/transform.h>
 #include "backend/android.h"
 #include "util/matrix.h"
+#include "android_dmabuf.h"
 
 struct android_renderer {
 	struct wlr_renderer base;
@@ -33,8 +37,12 @@ struct android_renderer {
 	EGLConfig config;
 	struct ANativeWindow *window;
 	GLuint rgba, external, solid;
-	struct wlr_drm_format_set shm_formats, ahb_formats;
+	bool unpack_row_length;
+	struct wlr_drm_format_set shm_formats, ahb_formats, dmabuf_formats;
+	struct android_dmabuf_bridge *dmabuf_bridge;
 	struct wl_list textures;
+	uint64_t frames, ahb_draws, copy_draws, shm_draws, uploads, readbacks;
+	uint64_t upload_pixels;
 };
 
 struct android_texture {
@@ -45,6 +53,7 @@ struct android_texture {
 	GLuint name;
 	GLenum target;
 	EGLImageKHR image;
+	AHardwareBuffer *copied_ahb;
 	bool swizzle, opaque;
 };
 
@@ -115,6 +124,7 @@ static void texture_destroy(struct wlr_texture *base) {
 	if (t->image != EGL_NO_IMAGE_KHR) {
 		eglDestroyImageKHR(t->renderer->display, t->image);
 	}
+	if (t->copied_ahb) AHardwareBuffer_release(t->copied_ahb);
 	wl_list_remove(&t->link);
 	if (t->buffer) {
 		wlr_buffer_unlock(t->buffer);
@@ -134,16 +144,36 @@ static bool upload_shm(struct android_texture *t, struct wlr_buffer *buffer) {
 		format == DRM_FORMAT_ABGR8888 || format == DRM_FORMAT_XBGR8888;
 	bool ok = false;
 	if (supported && stride >= (size_t)buffer->width * 4) {
+		t->renderer->uploads++;
+		t->renderer->upload_pixels += (uint64_t)buffer->width * buffer->height;
 		t->swizzle = format == DRM_FORMAT_ARGB8888 || format == DRM_FORMAT_XRGB8888;
 		t->opaque = format == DRM_FORMAT_XRGB8888 || format == DRM_FORMAT_XBGR8888;
 		glBindTexture(GL_TEXTURE_2D, t->name);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buffer->width, buffer->height,
-			0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
 		glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-		for (int y = 0; y < buffer->height; y++) {
-			glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, buffer->width, 1,
-				GL_RGBA, GL_UNSIGNED_BYTE, (char *)data + y * stride);
+		bool tight = stride == (size_t)buffer->width * 4;
+		bool row_length = t->renderer->unpack_row_length &&
+			stride % 4 == 0 && stride / 4 <= INT_MAX;
+		if (tight || row_length) {
+			/* One upload for the whole buffer, including padded scanlines.
+			 * Restore pixel-store state before importing another client. */
+			if (row_length) {
+				glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, stride / 4);
+			}
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buffer->width, buffer->height,
+				0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+			if (row_length) {
+				glPixelStorei(GL_UNPACK_ROW_LENGTH_EXT, 0);
+			}
+		} else {
+			/* GLES2 without EXT_unpack_subimage still accepts arbitrary strides. */
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, buffer->width, buffer->height,
+				0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+			for (int y = 0; y < buffer->height; y++) {
+				glTexSubImage2D(GL_TEXTURE_2D, 0, 0, y, buffer->width, 1,
+					GL_RGBA, GL_UNSIGNED_BYTE, (char *)data + y * stride);
+			}
 		}
+		glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
 		ok = glGetError() == GL_NO_ERROR;
 	}
 	wlr_buffer_end_data_ptr_access(buffer);
@@ -164,7 +194,7 @@ static bool texture_update(struct wlr_texture *base, struct wlr_buffer *buffer,
 static bool texture_read_pixels(struct wlr_texture *base,
 		const struct wlr_texture_read_pixels_options *options) {
 	struct android_texture *t = wl_container_of(base, t, base);
-	if (t->target != GL_TEXTURE_2D || options->format != DRM_FORMAT_ARGB8888
+	if (options->format != DRM_FORMAT_ARGB8888
 			|| !make_current(t->renderer)) {
 		return false;
 	}
@@ -182,14 +212,24 @@ static bool texture_read_pixels(struct wlr_texture *base,
 	}
 	GLint previous_fbo = 0;
 	GLuint framebuffer = 0;
+	GLuint readable = 0;
+	GLuint texture = t->name;
+	if (t->target != GL_TEXTURE_2D) {
+		if (t->image == EGL_NO_IMAGE_KHR) { free(scratch); return false; }
+		glGenTextures(1, &readable);
+		glBindTexture(GL_TEXTURE_2D, readable);
+		glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, t->image);
+		texture = readable;
+	}
 	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previous_fbo);
 	glGenFramebuffers(1, &framebuffer);
 	glBindFramebuffer(GL_FRAMEBUFFER, framebuffer);
 	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-		GL_TEXTURE_2D, t->name, 0);
+		GL_TEXTURE_2D, texture, 0);
 	bool ok = glCheckFramebufferStatus(GL_FRAMEBUFFER)
 		== GL_FRAMEBUFFER_COMPLETE;
 	uint32_t *dst = wlr_texture_read_pixel_options_get_data(options);
+	if (ok) t->renderer->readbacks++;
 	glPixelStorei(GL_PACK_ALIGNMENT, 1);
 	for (int y = 0; ok && y < src.height; y++) {
 		glReadPixels(src.x, src.y + y, src.width, 1,
@@ -211,6 +251,7 @@ static bool texture_read_pixels(struct wlr_texture *base,
 	}
 	glBindFramebuffer(GL_FRAMEBUFFER, (GLuint)previous_fbo);
 	glDeleteFramebuffers(1, &framebuffer);
+	if (readable) glDeleteTextures(1, &readable);
 	free(scratch);
 	return ok;
 }
@@ -241,6 +282,12 @@ static struct android_texture *import_texture(struct android_renderer *r,
 	wlr_texture_init(&t->base, &r->base, &texture_impl, buffer->width, buffer->height);
 	wl_list_insert(&r->textures, &t->link);
 	AHardwareBuffer *ahb = wlr_buffer_get_ahb(buffer);
+	struct wlr_dmabuf_attributes dmabuf = {0};
+	if (!ahb && wlr_buffer_get_dmabuf(buffer, &dmabuf)) {
+		if (render_target) goto fail;
+		ahb = t->copied_ahb = android_dmabuf_bridge_copy(r->dmabuf_bridge, &dmabuf);
+		if (!ahb) goto fail;
+	}
 	t->target = ahb && !render_target ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
 	glGenTextures(1, &t->name);
 	glBindTexture(t->target, t->name);
@@ -267,6 +314,10 @@ static struct android_texture *import_texture(struct android_renderer *r,
 		AHardwareBuffer_describe(ahb, &desc);
 		t->opaque = desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM ||
 			desc.format == AHARDWAREBUFFER_FORMAT_R8G8B8_UNORM;
+		if (t->copied_ahb) {
+			t->swizzle = dmabuf.format == DRM_FORMAT_ARGB8888 || dmabuf.format == DRM_FORMAT_XRGB8888;
+			t->opaque = dmabuf.format == DRM_FORMAT_XRGB8888 || dmabuf.format == DRM_FORMAT_XBGR8888;
+		}
 		t->buffer = wlr_buffer_lock(buffer);
 	} else if (render_target || !upload_shm(t, buffer)) {
 		goto fail;
@@ -373,6 +424,11 @@ static void add_texture(struct wlr_render_pass *base,
 	glUniform1i(glGetUniformLocation(p, "opaque"), t->opaque);
 	glUniform1f(glGetUniformLocation(p, "alpha"), wlr_render_texture_options_get_alpha(options));
 	blend(options->blend_mode);
+	if (!pass->window) {
+		if (t->copied_ahb) pass->renderer->copy_draws++;
+		else if (t->image != EGL_NO_IMAGE_KHR) pass->renderer->ahb_draws++;
+		else pass->renderer->shm_draws++;
+	}
 	draw(pass, &dst, options->clip, uv);
 }
 
@@ -468,6 +524,23 @@ bool android_renderer_present(struct wlr_renderer *base, struct wlr_buffer *buff
 		ok = glGetError() == GL_NO_ERROR && eglSwapBuffers(r->display, r->surface);
 	}
 	texture_destroy(&t->base);
+	if (ok && (++r->frames == 1 || r->frames % 120 == 0)) {
+		char totals[384];
+		snprintf(totals, sizeof(totals), "frames=%" PRIu64
+			" ahb_draws=%" PRIu64 " gpu_copy_draws=%" PRIu64
+			" shm_draws=%" PRIu64 " cpu_uploads=%" PRIu64
+			" cpu_upload_pixels=%" PRIu64 " readbacks=%" PRIu64,
+			r->frames, r->ahb_draws, r->copy_draws, r->shm_draws,
+			r->uploads, r->upload_pixels, r->readbacks);
+		wlr_log(WLR_INFO, "Android render totals: %s", totals);
+		/* Some Android builds suppress application logcat output. */
+		const char *runtime = getenv("XDG_RUNTIME_DIR");
+		char path[PATH_MAX];
+		if (runtime && snprintf(path, sizeof(path), "%s/render-stats.txt", runtime) < (int)sizeof(path)) {
+			FILE *file = fopen(path, "w");
+			if (file) { fprintf(file, "%s\n", totals); fclose(file); }
+		}
+	}
 	if (!ok) {
 		wlr_log(WLR_ERROR, "Android Surface present failed: EGL 0x%x", eglGetError());
 	}
@@ -500,6 +573,7 @@ static const struct wlr_drm_format_set *texture_formats(struct wlr_renderer *bas
 	if (caps & WLR_BUFFER_CAP_AHB) {
 		return &r->ahb_formats;
 	}
+	if ((caps & WLR_BUFFER_CAP_DMABUF) && r->dmabuf_bridge) return &r->dmabuf_formats;
 	return caps & (WLR_BUFFER_CAP_SHM | WLR_BUFFER_CAP_DATA_PTR) ? &r->shm_formats : NULL;
 }
 
@@ -530,6 +604,8 @@ static void renderer_destroy(struct wlr_renderer *base) {
 	if (r->window) ANativeWindow_release(r->window);
 	wlr_drm_format_set_finish(&r->shm_formats);
 	wlr_drm_format_set_finish(&r->ahb_formats);
+	wlr_drm_format_set_finish(&r->dmabuf_formats);
+	android_dmabuf_bridge_destroy(r->dmabuf_bridge);
 	free(r);
 }
 
@@ -570,6 +646,15 @@ struct wlr_renderer *wlr_android_renderer_create(struct wlr_backend *base) {
 	if (r->context == EGL_NO_CONTEXT) goto fail;
 	r->surface = eglCreateWindowSurface(r->display, config, (EGLNativeWindowType)r->window, NULL);
 	if (r->surface == EGL_NO_SURFACE || !make_current(r)) goto fail;
+	int gl_major = 0;
+	const char *gl_version = (const char *)glGetString(GL_VERSION);
+	const char *gl_extensions = (const char *)glGetString(GL_EXTENSIONS);
+	if (gl_version) sscanf(gl_version, "OpenGL ES %d", &gl_major);
+	const char *unpack = gl_extensions ? strstr(gl_extensions, "GL_EXT_unpack_subimage") : NULL;
+	r->unpack_row_length = gl_major >= 3 || (unpack &&
+		(unpack == gl_extensions || unpack[-1] == ' ') &&
+		(unpack[strlen("GL_EXT_unpack_subimage")] == ' ' ||
+		 unpack[strlen("GL_EXT_unpack_subimage")] == '\0'));
 	eglSwapInterval(r->display, 0);
 #define SAMPLE_BODY "precision mediump float; varying vec2 texcoord;" \
 	"uniform bool swizzle; uniform bool opaque; uniform float alpha;" \
@@ -581,10 +666,12 @@ struct wlr_renderer *wlr_android_renderer_create(struct wlr_backend *base) {
 #undef SAMPLE_BODY
 	r->solid = program("precision mediump float; uniform vec4 color; void main(){gl_FragColor=color;}");
 	if (!r->rgba || !r->external || !r->solid) goto fail;
+	r->dmabuf_bridge = android_dmabuf_bridge_create();
 	uint32_t formats[] = {DRM_FORMAT_ARGB8888,DRM_FORMAT_XRGB8888,DRM_FORMAT_ABGR8888,DRM_FORMAT_XBGR8888};
 	for (size_t i = 0; i < sizeof(formats)/sizeof(formats[0]); i++) {
 		if (!wlr_drm_format_set_add(&r->shm_formats, formats[i], DRM_FORMAT_MOD_LINEAR)) goto fail;
 		if (!wlr_drm_format_set_add(&r->ahb_formats, formats[i], DRM_FORMAT_MOD_INVALID)) goto fail;
+		if (r->dmabuf_bridge && !wlr_drm_format_set_add(&r->dmabuf_formats, formats[i], DRM_FORMAT_MOD_LINEAR)) goto fail;
 	}
 	wlr_renderer_init(&r->base, &renderer_impl, WLR_BUFFER_CAP_AHB);
 	backend->renderer = &r->base;

@@ -209,7 +209,8 @@ static bool check_import_dmabuf(struct wlr_dmabuf_attributes *attribs, void *dat
 	struct wlr_linux_dmabuf_v1 *linux_dmabuf = data;
 
 	if (linux_dmabuf->main_device_fd < 0) {
-		return true;
+		return wlr_drm_format_set_has(&linux_dmabuf->default_formats,
+			attribs->format, attribs->modifier);
 	}
 
 	// TODO: check number of planes
@@ -948,9 +949,11 @@ error_compiled:
 	return false;
 }
 
-struct wlr_linux_dmabuf_v1 *wlr_linux_dmabuf_v1_create(struct wl_display *display,
-		uint32_t version, const struct wlr_linux_dmabuf_feedback_v1 *default_feedback) {
+static struct wlr_linux_dmabuf_v1 *linux_dmabuf_create(struct wl_display *display,
+		uint32_t version, const struct wlr_linux_dmabuf_feedback_v1 *default_feedback,
+		const struct wlr_drm_format_set *formats) {
 	assert(version <= LINUX_DMABUF_VERSION);
+	assert(default_feedback || (formats && version < 4));
 
 	struct wlr_linux_dmabuf_v1 *linux_dmabuf = calloc(1, sizeof(*linux_dmabuf));
 	if (linux_dmabuf == NULL) {
@@ -970,7 +973,8 @@ struct wlr_linux_dmabuf_v1 *wlr_linux_dmabuf_v1_create(struct wl_display *displa
 		goto error_linux_dmabuf;
 	}
 
-	if (!set_default_feedback(linux_dmabuf, default_feedback)) {
+	if (default_feedback ? !set_default_feedback(linux_dmabuf, default_feedback) :
+			!wlr_drm_format_set_copy(&linux_dmabuf->default_formats, formats)) {
 		goto error_global;
 	}
 
@@ -991,8 +995,21 @@ error_linux_dmabuf:
 	return NULL;
 }
 
+struct wlr_linux_dmabuf_v1 *wlr_linux_dmabuf_v1_create(struct wl_display *display,
+		uint32_t version, const struct wlr_linux_dmabuf_feedback_v1 *feedback) {
+	return linux_dmabuf_create(display, version, feedback, NULL);
+}
+
 struct wlr_linux_dmabuf_v1 *wlr_linux_dmabuf_v1_create_with_renderer(struct wl_display *display,
 		uint32_t version, struct wlr_renderer *renderer) {
+	/* v3 advertises formats/modifiers without v4's DRM device feedback. This
+	 * is a standard import-only path for renderers without a DRM node. */
+	if (wlr_renderer_get_drm_fd(renderer) < 0) {
+		const struct wlr_drm_format_set *formats =
+			wlr_renderer_get_texture_formats(renderer, WLR_BUFFER_CAP_DMABUF);
+		if (!formats || formats->len == 0) return NULL;
+		return linux_dmabuf_create(display, version < 3 ? version : 3, NULL, formats);
+	}
 	const struct wlr_linux_dmabuf_feedback_v1_init_options options = {
 		.main_renderer = renderer,
 	};
