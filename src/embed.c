@@ -33,6 +33,7 @@
 #include "config/rcxml.h"
 #include "config/session.h"
 #include "input/cursor.h"
+#include "input/ime.h"
 #include "labwc.h"
 #include "menu/menu.h"
 #include "theme.h"
@@ -537,6 +538,12 @@ embed_send_unicode(uint32_t codepoint)
 	}
 found:
 	if (found_evdev <= 0) {
+		char text[8];
+		if (xkb_keysym_to_utf8(want, text, sizeof(text)) > 0
+				&& input_method_relay_commit_text(
+					server.seat.input_method_relay, text)) {
+			return;
+		}
 		wlr_log(WLR_DEBUG, "embed unicode U+%04X through Fcitx",
 			codepoint);
 		embed_send_fcitx_unicode(kb, codepoint);

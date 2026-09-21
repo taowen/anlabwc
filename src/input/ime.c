@@ -105,7 +105,7 @@ input_method_keyboard_grab_forward_key(struct keyboard *keyboard,
 static struct text_input *
 get_active_text_input(struct input_method_relay *relay)
 {
-	if (!relay->input_method) {
+	if (!relay->input_method && !relay->hosted_input_method) {
 		return NULL;
 	}
 	struct text_input *text_input;
@@ -156,7 +156,8 @@ update_text_inputs_focused_surface(struct input_method_relay *relay)
 		struct wlr_text_input_v3 *input = text_input->input;
 
 		struct wlr_surface *new_focused_surface;
-		if (relay->input_method && relay->focused_surface
+		if ((relay->input_method || relay->hosted_input_method)
+				&& relay->focused_surface
 				&& SAME_CLIENT(input, relay->focused_surface)) {
 			new_focused_surface = relay->focused_surface;
 		} else {
@@ -454,6 +455,9 @@ handle_new_input_method(struct wl_listener *listener, void *data)
 static void
 send_state_to_input_method(struct input_method_relay *relay)
 {
+	if (!relay->input_method) {
+		return;
+	}
 	assert(relay->active_text_input && relay->input_method);
 
 	struct wlr_input_method_v2 *input_method = relay->input_method;
@@ -581,6 +585,9 @@ input_method_relay_create(struct seat *seat)
 {
 	struct input_method_relay *relay = znew(*relay);
 	relay->seat = seat;
+#if HAVE_ANDROID_EMBED
+	relay->hosted_input_method = server.embed.android != NULL;
+#endif
 	wl_list_init(&relay->text_inputs);
 	wl_list_init(&relay->popups);
 	relay->popup_tree = lab_wlr_scene_tree_create(&server.scene->tree);
@@ -604,6 +611,21 @@ input_method_relay_finish(struct input_method_relay *relay)
 	wl_list_remove(&relay->new_text_input.link);
 	wl_list_remove(&relay->new_input_method.link);
 	free(relay);
+}
+
+bool
+input_method_relay_commit_text(struct input_method_relay *relay,
+		const char *text)
+{
+	/* A separately connected Linux IME owns its own composition state. */
+	if (!relay || !relay->hosted_input_method || relay->input_method
+			|| !relay->active_text_input) {
+		return false;
+	}
+	struct wlr_text_input_v3 *input = relay->active_text_input->input;
+	wlr_text_input_v3_send_commit_string(input, text);
+	wlr_text_input_v3_send_done(input);
+	return true;
 }
 
 void

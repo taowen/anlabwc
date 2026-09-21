@@ -19,12 +19,13 @@ struct input_method_relay {
 	struct seat *seat;
 	struct wl_list text_inputs; /* struct text_input.link */
 	struct wlr_input_method_v2 *input_method;
+	bool hosted_input_method;
 	struct wlr_surface *focused_surface;
 
 	/*
 	 * Text-input which is enabled by the client and communicating with
 	 * input-method.
-	 * This must be NULL if input-method is not present.
+	 * This must be NULL if neither a hosted nor a protocol input-method is present.
 	 * Its client must be the same as that of focused_surface.
 	 */
 	struct text_input *active_text_input;
@@ -83,6 +84,10 @@ bool input_method_keyboard_grab_forward_modifiers(struct keyboard *keyboard);
 struct input_method_relay *input_method_relay_create(struct seat *seat);
 
 void input_method_relay_finish(struct input_method_relay *relay);
+
+/* Commit hosted IME text to an enabled, focused Wayland text input. */
+bool input_method_relay_commit_text(struct input_method_relay *relay,
+	const char *text);
 
 /* Updates currently focused surface. Surface must belong to the same seat. */
 void input_method_relay_set_focus(struct input_method_relay *relay,
