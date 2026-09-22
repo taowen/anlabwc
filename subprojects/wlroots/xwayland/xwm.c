@@ -1237,6 +1237,15 @@ static void xwayland_surface_associate(struct wlr_xwm *xwm,
 	}
 
 	wl_signal_emit_mutable(&xsurface->events.associate, NULL);
+
+	/* X11 association and Wayland commits arrive on independent connections.
+	 * A client can have submitted its only frame before we installed the commit
+	 * listener. Apply that existing state after listeners are connected, just
+	 * as we do for a subsequent commit; do not wait for another client frame. */
+	if (wlr_surface_has_buffer(surface) && !surface->mapped) {
+		wlr_log(WLR_DEBUG, "Mapping already-buffered X11 window %u", xsurface->window_id);
+		wlr_surface_map(surface);
+	}
 }
 
 static void xwm_handle_create_notify(struct wlr_xwm *xwm,
@@ -2087,12 +2096,12 @@ static int x11_event_handler(int fd, uint32_t mask, void *data) {
 		return 0;
 	}
 
-	int count = 0;
-	if (mask & WL_EVENT_READABLE) {
-		count = read_x11_events(xwm);
-		if (count) {
-			xwm_schedule_flush(xwm);
-		}
+	/* Reply reads can queue events inside XCB without leaving the socket
+	 * readable. The event-loop check callback (mask == 0) must drain those
+	 * too, otherwise association can wait indefinitely for another event. */
+	int count = read_x11_events(xwm);
+	if (count) {
+		xwm_schedule_flush(xwm);
 	}
 
 	if (mask & WL_EVENT_WRITABLE) {
