@@ -944,7 +944,11 @@ void wlr_scene_buffer_set_buffer_with_options(struct wlr_scene_buffer *scene_buf
 		}
 	}
 
+	bool prev_opaque = scene_buffer->buffer_is_opaque;
 	scene_buffer_set_buffer(scene_buffer, buffer);
+	// A format change can reveal nodes below even when size and the explicit
+	// opaque region stay unchanged (for example, XRGB SHM to RGBA AHB).
+	update = update || prev_opaque != scene_buffer->buffer_is_opaque;
 	scene_buffer_set_texture(scene_buffer, NULL);
 	scene_buffer_set_wait_timeline(scene_buffer,
 		options->wait_timeline, options->wait_point);
