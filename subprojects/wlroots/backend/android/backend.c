@@ -16,6 +16,10 @@ static const struct wlr_keyboard_impl keyboard_impl = {
 	.name = "anlabwc-android-keyboard",
 };
 
+static const struct wlr_touch_impl touch_impl = {
+	.name = "anlabwc-android-touchscreen",
+};
+
 struct wlr_android_backend *android_backend_from_backend(
 		struct wlr_backend *wlr_backend) {
 	assert(wlr_backend_is_android(wlr_backend));
@@ -36,6 +40,8 @@ static bool backend_start(struct wlr_backend *wlr_backend) {
 		&backend->keyboard.base);
 	wl_signal_emit_mutable(&backend->backend.events.new_output,
 		&backend->output);
+	wl_signal_emit_mutable(&backend->backend.events.new_input,
+		&backend->touch.base);
 
 	backend->started = true;
 	return true;
@@ -54,6 +60,7 @@ static void backend_destroy(struct wlr_backend *wlr_backend) {
 		wlr_output_destroy(&backend->output);
 	}
 	wlr_pointer_finish(&backend->pointer);
+	wlr_touch_finish(&backend->touch);
 	wlr_keyboard_finish(&backend->keyboard);
 
 	wl_list_remove(&backend->event_loop_destroy.link);
@@ -104,6 +111,7 @@ struct wlr_backend *wlr_android_backend_create(struct wl_event_loop *loop,
 	wl_event_loop_add_destroy_listener(loop, &backend->event_loop_destroy);
 
 	wlr_pointer_init(&backend->pointer, &pointer_impl, "anlabwc-android-pointer");
+	wlr_touch_init(&backend->touch, &touch_impl, "anlabwc-android-touchscreen");
 	wlr_keyboard_init(&backend->keyboard, &keyboard_impl,
 		"anlabwc-android-keyboard");
 
@@ -217,4 +225,38 @@ void wlr_android_keyboard_key(struct wlr_backend *wlr_backend,
 			: WL_KEYBOARD_KEY_STATE_RELEASED,
 	};
 	wlr_keyboard_notify_key(&backend->keyboard, &event);
+}
+
+void wlr_android_touch(struct wlr_backend *base, int id, int action, double x, double y) {
+	struct wlr_android_backend *backend = android_backend_from_backend(base);
+	if (backend->output.width <= 0 || backend->output.height <= 0) return;
+	struct wlr_touch *touch = &backend->touch;
+	uint32_t now = (uint32_t)get_current_time_msec();
+	// The output can resize when an external display is selected.
+	x /= backend->output.width;
+	y /= backend->output.height;
+	switch (action) {
+	case 0: {
+		struct wlr_touch_down_event event = {.touch = touch, .time_msec = now, .touch_id = id, .x = x, .y = y};
+		wl_signal_emit_mutable(&touch->events.down, &event);
+		break;
+	}
+	case 1: {
+		struct wlr_touch_up_event event = {.touch = touch, .time_msec = now, .touch_id = id};
+		wl_signal_emit_mutable(&touch->events.up, &event);
+		break;
+	}
+	case 2: {
+		struct wlr_touch_motion_event event = {.touch = touch, .time_msec = now, .touch_id = id, .x = x, .y = y};
+		wl_signal_emit_mutable(&touch->events.motion, &event);
+		break;
+	}
+	case 3: {
+		struct wlr_touch_cancel_event event = {.touch = touch, .time_msec = now, .touch_id = id};
+		wl_signal_emit_mutable(&touch->events.cancel, &event);
+		break;
+	}
+	default: return;
+	}
+	wl_signal_emit_mutable(&touch->events.frame, NULL);
 }

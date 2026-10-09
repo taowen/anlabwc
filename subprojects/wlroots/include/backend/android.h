@@ -5,6 +5,7 @@
 #include <wlr/backend/interface.h>
 #include <wlr/interfaces/wlr_keyboard.h>
 #include <wlr/interfaces/wlr_pointer.h>
+#include <wlr/interfaces/wlr_touch.h>
 #include <wlr/types/wlr_output.h>
 
 #define ANDROID_DEFAULT_REFRESH (60 * 1000)
@@ -23,6 +24,7 @@ struct wlr_android_backend {
 	int frame_delay;
 
 	struct wlr_pointer pointer;
+	struct wlr_touch touch;
 	struct wlr_keyboard keyboard;
 	struct wlr_renderer *renderer;
 };

@@ -49,6 +49,7 @@ enum {
 	EMBED_PTR_BUTTON,
 	EMBED_KEY,
 	EMBED_AXIS,
+	EMBED_TOUCH,
 	EMBED_UNICODE,
 	EMBED_WINDOW,
 	EMBED_WINDOW_RESIZE_SHAPE,
@@ -602,6 +603,9 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 	case EMBED_AXIS:
 		wlr_android_pointer_axis(server.embed.android, msg.x, msg.y);
 		break;
+	case EMBED_TOUCH:
+		wlr_android_touch(server.embed.android, msg.pointer_id, msg.pressed, msg.x, msg.y);
+		break;
 	case EMBED_UNICODE:
 		embed_send_unicode(msg.button);
 		break;
@@ -800,6 +804,20 @@ anlabwc_key(int evdev, int pressed)
 		.type = EMBED_KEY,
 		.keycode = (uint32_t)evdev,
 		.pressed = pressed,
+	};
+	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_touch(int id, int action, float x, float y)
+{
+	if (id < 0 || id >= 32 || action < 0 || action > 3) return -1;
+	struct embed_msg msg = {
+		.type = EMBED_TOUCH,
+		.pointer_id = id,
+		.pressed = action,
+		.x = x,
+		.y = y,
 	};
 	return send_msg(&msg);
 }

@@ -31,6 +31,7 @@ void wlr_android_pointer_motion(struct wlr_backend *backend, double x, double y)
 void wlr_android_pointer_button(struct wlr_backend *backend, uint32_t button,
 	bool pressed);
 void wlr_android_pointer_axis(struct wlr_backend *backend, double dx, double dy);
+void wlr_android_touch(struct wlr_backend *backend, int id, int action, double x, double y);
 void wlr_android_keyboard_key(struct wlr_backend *backend, uint32_t keycode,
 	bool pressed);
 

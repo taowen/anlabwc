@@ -52,6 +52,8 @@ ANLABWC_API int anlabwc_window_resize_shape(float x, float y);
 ANLABWC_API int anlabwc_window_transform(int action, float anchor_x,
 	float anchor_y, float focus_x, float focus_y);
 ANLABWC_API int anlabwc_axis(float dx, float dy);
+/* Touch contacts in output pixels: 0=down, 1=up, 2=move, 3=cancel. */
+ANLABWC_API int anlabwc_touch(int id, int action, float x, float y);
 ANLABWC_API int anlabwc_key(int evdev, int pressed);
 /* UTF-32 codepoint. Looks up the current XKB map (US + Shift). */
 ANLABWC_API int anlabwc_unicode(uint32_t codepoint);
