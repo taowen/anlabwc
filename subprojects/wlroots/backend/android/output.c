@@ -23,10 +23,26 @@ static struct wlr_android_backend *backend_from_output(
 
 static bool output_test(struct wlr_output *wlr_output,
 		const struct wlr_output_state *state) {
-	(void)wlr_output;
 	if ((state->committed & WLR_OUTPUT_STATE_BUFFER) &&
 			!wlr_buffer_get_ahb(state->buffer)) {
 		return false;
+	}
+	if (state->committed & WLR_OUTPUT_STATE_BUFFER) {
+		int width, height;
+		output_pending_resolution(wlr_output, state, &width, &height);
+		/* Presentation copies a complete output; scene crops and placement
+		 * must be composed before reaching the Android Surface. */
+		if (!wlr_fbox_empty(&state->buffer_src_box)
+				|| state->buffer_dst_box.x != 0
+				|| state->buffer_dst_box.y != 0
+				|| (state->buffer_dst_box.width != 0
+					&& state->buffer_dst_box.width != width)
+				|| (state->buffer_dst_box.height != 0
+					&& state->buffer_dst_box.height != height)
+				|| state->buffer->width != width
+				|| state->buffer->height != height) {
+			return false;
+		}
 	}
 	uint32_t unsupported = state->committed & ~SUPPORTED_OUTPUT_STATE;
 	if (unsupported != 0) {
