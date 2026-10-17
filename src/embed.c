@@ -54,6 +54,7 @@ enum {
 	EMBED_WINDOW,
 	EMBED_WINDOW_RESIZE_SHAPE,
 	EMBED_WINDOW_TRANSFORM,
+	EMBED_PTR_RELATIVE,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -579,6 +580,13 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	switch (msg.type) {
+	case EMBED_PTR_RELATIVE:
+		wlr_android_pointer_relative(server.embed.android, msg.x, msg.y);
+		if (msg.button && msg.pressed >= 0) {
+			wlr_android_pointer_button(server.embed.android, msg.button, msg.pressed != 0);
+		}
+		cursor_set_visible(&server.seat, false);
+		break;
 	case EMBED_PTR_MOTION:
 		wlr_android_pointer_motion(server.embed.android, msg.x, msg.y);
 		cursor_set_visible(&server.seat, false);
@@ -656,6 +664,21 @@ ANLABWC_API int
 anlabwc_pointer(float x, float y, int button, int pressed)
 {
 	return anlabwc_pointer_v2(EMBED_RIGHT_HAND, x, y, button, pressed);
+}
+
+ANLABWC_API int
+anlabwc_relative_pointer(float dx, float dy, int button, int pressed)
+{
+	if (!isfinite(dx) || !isfinite(dy)) {
+		return -EINVAL;
+	}
+	struct embed_msg msg = {
+		.type = EMBED_PTR_RELATIVE,
+		.x = dx, .y = dy,
+		.button = button > 0 ? (uint32_t)button : 0,
+		.pressed = pressed,
+	};
+	return send_msg(&msg);
 }
 
 ANLABWC_API int

@@ -28,6 +28,7 @@ bool wlr_android_backend_set_window(struct wlr_backend *backend,
 	struct ANativeWindow *window, int width, int height);
 
 void wlr_android_pointer_motion(struct wlr_backend *backend, double x, double y);
+void wlr_android_pointer_relative(struct wlr_backend *backend, double dx, double dy);
 void wlr_android_pointer_button(struct wlr_backend *backend, uint32_t button,
 	bool pressed);
 void wlr_android_pointer_axis(struct wlr_backend *backend, double dx, double dy);

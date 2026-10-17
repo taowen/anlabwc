@@ -31,6 +31,7 @@ ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
 /* Logical hand id: 0 is right, 1 is left; Android owns cursor rendering. */
 ANLABWC_API int anlabwc_pointer_v2(int pointer_id, float x, float y,
 	int button, int pressed);
+ANLABWC_API int anlabwc_relative_pointer(float dx, float dy, int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);
 /*
  * Copies the current client-provided cursor image as Android ARGB pixels.

@@ -164,6 +164,19 @@ void wlr_android_pointer_motion(struct wlr_backend *wlr_backend,
 	wl_signal_emit_mutable(&backend->pointer.events.frame, NULL);
 }
 
+void wlr_android_pointer_relative(struct wlr_backend *base, double dx, double dy) {
+	struct wlr_android_backend *backend = android_backend_from_backend(base);
+	if (dx == 0 && dy == 0) return;
+	struct wlr_pointer_motion_event event = {
+		.pointer = &backend->pointer,
+		.time_msec = (uint32_t)get_current_time_msec(),
+		.delta_x = dx, .delta_y = dy,
+		.unaccel_dx = dx, .unaccel_dy = dy,
+	};
+	wl_signal_emit_mutable(&backend->pointer.events.motion, &event);
+	wl_signal_emit_mutable(&backend->pointer.events.frame, NULL);
+}
+
 void wlr_android_pointer_button(struct wlr_backend *wlr_backend,
 		uint32_t button, bool pressed) {
 	struct wlr_android_backend *backend =
