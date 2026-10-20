@@ -964,6 +964,7 @@ handle_constraint_destroy(struct wl_listener *listener, void *data)
 		}
 		wl_list_init(&seat->constraint_commit.link);
 		seat->current_constraint = NULL;
+		anlabwc_embed_set_pointer_locked(false);
 	}
 
 	free(constraint);
@@ -1005,6 +1006,8 @@ constrain_cursor(struct wlr_pointer_constraint_v1
 	}
 
 	seat->current_constraint = constraint;
+	anlabwc_embed_set_pointer_locked(constraint
+		&& constraint->type == WLR_POINTER_CONSTRAINT_V1_LOCKED);
 
 	if (!constraint) {
 		wl_list_init(&seat->constraint_commit.link);

@@ -481,6 +481,7 @@ void anlabwc_embed_set_cursor_image(const uint32_t *pixels, int width,
 	int height, int hotspot_x, int hotspot_y);
 void anlabwc_embed_note_primary_selection(void);
 void anlabwc_embed_set_window_grab(int mode);
+void anlabwc_embed_set_pointer_locked(bool locked);
 void anlabwc_embed_set_window_transform_ready(bool ready);
 #endif
 

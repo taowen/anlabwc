@@ -123,6 +123,7 @@ transform_request_release(struct transform_request *request)
 static char wayland_socket_path[512];
 static volatile bool running;
 static atomic_uint cursor_shape = 1;
+static atomic_bool pointer_locked;
 static atomic_uint primary_selection_serial;
 static atomic_int window_grab_mode;
 static atomic_bool window_transform_ready;
@@ -190,6 +191,18 @@ ANLABWC_API int
 anlabwc_cursor_shape(void)
 {
 	return (int)atomic_load_explicit(&cursor_shape, memory_order_relaxed);
+}
+
+void
+anlabwc_embed_set_pointer_locked(bool locked)
+{
+	atomic_store_explicit(&pointer_locked, locked, memory_order_relaxed);
+}
+
+ANLABWC_API int
+anlabwc_pointer_locked(void)
+{
+	return atomic_load_explicit(&pointer_locked, memory_order_relaxed);
 }
 
 void
