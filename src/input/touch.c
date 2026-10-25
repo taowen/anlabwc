@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "input/touch.h"
+#include "input/cursor.h"
 #include <wayland-util.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_scene.h>
@@ -190,30 +191,49 @@ handle_touch_down(struct wl_listener *listener, void *data)
 }
 
 static void
+end_touch_point(struct seat *seat, int32_t id, uint32_t time_msec, bool cancelled)
+{
+	idle_manager_notify_activity(seat->wlr_seat);
+	struct touch_point *point, *tmp;
+	wl_list_for_each_safe(point, tmp, &seat->touch_points, link) {
+		if (point->touch_id != id) {
+			continue;
+		}
+		if (point->surface) {
+			if (cancelled) {
+				wlr_seat_touch_notify_cancel(seat->wlr_seat, point->surface);
+			} else {
+				wlr_seat_touch_notify_up(seat->wlr_seat, time_msec, id);
+			}
+		} else {
+			if (cancelled) {
+				cursor_emulate_cancel(seat, BTN_LEFT, time_msec);
+			} else {
+				cursor_emulate_button(seat, BTN_LEFT,
+					WL_POINTER_BUTTON_STATE_RELEASED, time_msec);
+			}
+			ssd_update_hovered_button(NULL);
+		}
+		wl_list_remove(&point->link);
+		zfree(point);
+		break;
+	}
+}
+
+static void
 handle_touch_up(struct wl_listener *listener, void *data)
 {
 	struct seat *seat = wl_container_of(listener, seat, touch_up);
 	struct wlr_touch_up_event *event = data;
+	end_touch_point(seat, event->touch_id, event->time_msec, false);
+}
 
-	idle_manager_notify_activity(seat->wlr_seat);
-
-	/* Remove the touch point from the seat */
-	struct touch_point *touch_point, *tmp;
-	wl_list_for_each_safe(touch_point, tmp, &seat->touch_points, link) {
-		if (touch_point->touch_id == event->touch_id) {
-			if (touch_point->surface) {
-				wlr_seat_touch_notify_up(seat->wlr_seat, event->time_msec,
-					event->touch_id);
-			} else {
-				cursor_emulate_button(seat, BTN_LEFT,
-					WL_POINTER_BUTTON_STATE_RELEASED, event->time_msec);
-				ssd_update_hovered_button(NULL);
-			}
-			wl_list_remove(&touch_point->link);
-			zfree(touch_point);
-			break;
-		}
-	}
+static void
+handle_touch_cancel(struct wl_listener *listener, void *data)
+{
+	struct seat *seat = wl_container_of(listener, seat, touch_cancel);
+	struct wlr_touch_cancel_event *event = data;
+	end_touch_point(seat, event->touch_id, event->time_msec, true);
 }
 
 void
@@ -221,6 +241,7 @@ touch_init(struct seat *seat)
 {
 	CONNECT_SIGNAL(seat->cursor, seat, touch_down);
 	CONNECT_SIGNAL(seat->cursor, seat, touch_up);
+	CONNECT_SIGNAL(seat->cursor, seat, touch_cancel);
 	CONNECT_SIGNAL(seat->cursor, seat, touch_motion);
 	CONNECT_SIGNAL(seat->cursor, seat, touch_frame);
 }
@@ -230,6 +251,7 @@ touch_finish(struct seat *seat)
 {
 	wl_list_remove(&seat->touch_down.link);
 	wl_list_remove(&seat->touch_up.link);
+	wl_list_remove(&seat->touch_cancel.link);
 	wl_list_remove(&seat->touch_motion.link);
 	wl_list_remove(&seat->touch_frame.link);
 }

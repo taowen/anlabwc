@@ -723,6 +723,7 @@ cursor_update_common(const struct cursor_context *ctx,
 	}
 
 	/* TODO: verify drag_icon logic */
+	ssd_spatial_update_hover(ctx->view, ctx->type, seat->cursor);
 	if (seat->pressed.ctx.surface && ctx->surface != seat->pressed.ctx.surface
 			&& !update_pressed_surface(seat, ctx)
 			&& !seat->drag.active) {
@@ -818,6 +819,10 @@ cursor_process_motion(uint32_t time, double *sx, double *sy)
 	}
 
 	struct mousebind *mousebind;
+	bool drag_ready = seat->pressed.ctx.type == LAB_NODE_CLIENT
+		|| ssd_spatial_drag_ready(seat->pressed.ctx.view ? seat->pressed.ctx.view->ssd : NULL,
+			seat->cursor->x - seat->pressed_cursor_x,
+			seat->cursor->y - seat->pressed_cursor_y);
 	wl_list_for_each(mousebind, &rc.mousebinds, link) {
 		if (ctx.type == LAB_NODE_CLIENT
 				&& view_inhibits_actions(ctx.view, &mousebind->actions)) {
@@ -825,6 +830,9 @@ cursor_process_motion(uint32_t time, double *sx, double *sy)
 		}
 		if (mousebind->mouse_event == MOUSE_ACTION_DRAG
 				&& mousebind->pressed_in_context) {
+			if (!drag_ready) {
+				continue;
+			}
 			/*
 			 * Use view and resize edges from the press
 			 * event (not the motion event) to prevent
@@ -1319,6 +1327,8 @@ cursor_process_button_press(struct seat *seat, uint32_t button, uint32_t time_ms
 
 	if (ctx.view || ctx.surface) {
 		/* Store cursor context for later action processing */
+		seat->pressed_cursor_x = seat->cursor->x;
+		seat->pressed_cursor_y = seat->cursor->y;
 		cursor_context_save(&seat->pressed, &ctx);
 		interactive_set_grab_context(&ctx);
 	}
@@ -1733,6 +1743,27 @@ cursor_emulate_button(struct seat *seat, uint32_t button,
 		cursor_finish_button_release(seat, button);
 		break;
 	}
+	wlr_seat_pointer_notify_frame(seat->wlr_seat);
+}
+
+void
+cursor_emulate_cancel(struct seat *seat, uint32_t button, uint32_t time_msec)
+{
+	bool notify = !lab_set_contains(&seat->bound_buttons, button);
+	cursor_context_save(&seat->pressed, NULL);
+	if (server.grabbed_view) {
+		if (resize_outlines_enabled(server.grabbed_view)) {
+			resize_outlines_finish(server.grabbed_view);
+		}
+		interactive_cancel(server.grabbed_view);
+	}
+	cursor_finish_button_release(seat, button);
+	if (notify) {
+		wlr_seat_pointer_notify_button(seat->wlr_seat, time_msec,
+			button, WL_POINTER_BUTTON_STATE_RELEASED);
+	}
+	ssd_update_hovered_button(NULL);
+	cursor_update_focus();
 	wlr_seat_pointer_notify_frame(seat->wlr_seat);
 }
 

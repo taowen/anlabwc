@@ -1693,6 +1693,7 @@ post_processing(struct theme *theme)
 		&theme->osd_window_switcher_thumbnail;
 
 	theme->titlebar_height = get_titlebar_height(theme);
+	ssd_spatial_configure_theme(theme);
 
 	fill_background_colors(&theme->window[SSD_INACTIVE].title_bg);
 	fill_background_colors(&theme->window[SSD_ACTIVE].title_bg);

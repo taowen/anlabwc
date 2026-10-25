@@ -91,6 +91,10 @@ ssd_border_update(struct ssd *ssd)
 	}
 
 	struct theme *theme = rc.theme;
+	if (ssd->spatial) {
+		ssd_spatial_border_update(ssd);
+		return;
+	}
 
 	int width = view->current.width;
 	int height = view_effective_height(view, /* use_pending */ false);

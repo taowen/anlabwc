@@ -25,6 +25,7 @@ struct wlr_cursor;
 struct server;
 struct ssd;
 struct ssd_button;
+struct theme;
 struct view;
 struct wlr_scene;
 struct wlr_scene_node;
@@ -52,6 +53,12 @@ void ssd_enable_keybind_inhibit_indicator(struct ssd *ssd, bool enable);
 void ssd_enable_shade(struct ssd *ssd, bool enable);
 
 void ssd_update_hovered_button(struct wlr_scene_node *node);
+/* Configure before creating the theme/views. Disabled by default. */
+void ssd_set_spatial_style(bool enabled);
+bool ssd_spatial_style_enabled(void);
+void ssd_spatial_configure_theme(struct theme *theme);
+void ssd_spatial_update_hover(struct view *view, enum lab_node_type type, struct wlr_cursor *cursor);
+bool ssd_spatial_drag_ready(const struct ssd *ssd, double dx, double dy);
 
 void ssd_button_free(struct ssd_button *button);
 

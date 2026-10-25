@@ -54,6 +54,16 @@ struct ssd_state_title_width {
 struct ssd {
 	struct view *view;
 	struct wlr_scene_tree *tree;
+	bool spatial;
+	struct {
+		int width;
+		int title_width;
+		bool title_dirty;
+		struct wlr_scene_tree *feedback;
+		struct wlr_scene_rect *move_area;
+		struct wlr_scene_buffer *move_glow;
+		struct wlr_scene_buffer *corners[4];
+	} spatial_frame;
 
 	/*
 	 * Cache for current values.
@@ -170,6 +180,13 @@ struct ssd_button *attach_ssd_button(struct wl_list *button_parts,
 
 /* SSD internal */
 void ssd_titlebar_create(struct ssd *ssd);
+void ssd_spatial_create(struct ssd *ssd);
+void ssd_spatial_update(struct ssd *ssd);
+void ssd_spatial_update_title(struct ssd *ssd);
+void ssd_spatial_border_update(struct ssd *ssd);
+void ssd_spatial_finish(struct ssd *ssd);
+enum lab_node_type ssd_spatial_context(const struct ssd *ssd,
+	struct wlr_cursor *cursor);
 void ssd_titlebar_update(struct ssd *ssd);
 void ssd_titlebar_destroy(struct ssd *ssd);
 bool ssd_should_be_squared(struct ssd *ssd);

@@ -16,8 +16,6 @@
 #include "view.h"
 #include "window-rules.h"
 
-#if HAVE_LIBSFDO
-
 static struct lab_data_buffer *
 choose_best_icon_buffer(struct scaled_icon_buffer *self, int icon_size, double scale)
 {
@@ -43,6 +41,7 @@ choose_best_icon_buffer(struct scaled_icon_buffer *self, int icon_size, double s
 	return best_buffer;
 }
 
+#if HAVE_LIBSFDO
 static struct lab_data_buffer *
 img_to_buffer(struct lab_img *img, int width, int height, double scale)
 {
@@ -95,10 +94,46 @@ load_server_icon(struct scaled_icon_buffer *self, int icon_size, double scale)
 #endif /* HAVE_LIBSFDO */
 
 static struct lab_data_buffer *
+client_icon_buffer(struct scaled_icon_buffer *self, double scale)
+{
+	struct lab_data_buffer *client = choose_best_icon_buffer(self,
+		MIN(self->width, self->height), scale);
+	if (client) {
+		return buffer_resize(client, self->width, self->height, scale);
+	}
+
+	/* A neutral application symbol, rather than a non-functional menu icon. */
+	struct lab_data_buffer *buffer = buffer_create_cairo(self->width, self->height, scale);
+	if (!buffer) {
+		return NULL;
+	}
+	cairo_t *cr = cairo_create(buffer->surface);
+	cairo_scale(cr, self->width / 24.0, self->height / 24.0);
+	cairo_set_source_rgba(cr, 0.26, 0.38, 0.54, 1);
+	cairo_set_line_width(cr, 1.6);
+	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+	cairo_rectangle(cr, 3, 3, 18, 18);
+	cairo_stroke(cr);
+	cairo_move_to(cr, 3, 8);
+	cairo_line_to(cr, 21, 8);
+	cairo_stroke(cr);
+	cairo_set_source_rgba(cr, 0.26, 0.38, 0.54, 0.65);
+	cairo_rectangle(cr, 7, 12, 4, 5);
+	cairo_rectangle(cr, 13, 12, 4, 5);
+	cairo_fill(cr);
+	cairo_surface_flush(buffer->surface);
+	cairo_destroy(cr);
+	return buffer;
+}
+
+static struct lab_data_buffer *
 _create_buffer(struct scaled_buffer *scaled_buffer, double scale)
 {
-#if HAVE_LIBSFDO
 	struct scaled_icon_buffer *self = scaled_buffer->data;
+	if (self->client_only) {
+		return client_icon_buffer(self, scale);
+	}
+#if HAVE_LIBSFDO
 	int icon_size = MIN(self->width, self->height);
 	struct lab_img *img = NULL;
 	struct lab_data_buffer *buffer = NULL;
@@ -199,6 +234,7 @@ _equal(struct scaled_buffer *scaled_buffer_a,
 	struct scaled_icon_buffer *b = scaled_buffer_b->data;
 
 	return str_equal(a->view_app_id, b->view_app_id)
+		&& a->client_only == b->client_only
 		&& a->view_icon_prefer_client == b->view_icon_prefer_client
 		&& str_equal(a->view_icon_name, b->view_icon_name)
 		&& icon_buffers_equal(&a->view_icon_buffers, &b->view_icon_buffers)
@@ -229,6 +265,15 @@ scaled_icon_buffer_create(struct wlr_scene_tree *parent, int width, int height)
 
 	scaled_buffer->data = self;
 
+	return self;
+}
+
+struct scaled_icon_buffer *
+scaled_icon_buffer_create_client(struct wlr_scene_tree *parent, int width, int height)
+{
+	struct scaled_icon_buffer *self = scaled_icon_buffer_create(parent, width, height);
+	self->client_only = true;
+	scaled_buffer_request_update(self->scaled_buffer, width, height);
 	return self;
 }
 

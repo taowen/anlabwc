@@ -104,14 +104,15 @@ ssd_extents_update(struct ssd *ssd)
 
 	int width = view->current.width;
 	int height = view_effective_height(view, /* use_pending */ false);
-	int full_height = height + theme->border_width * 2 + ssd->titlebar.height;
+	int titlebar_height = ssd->spatial ? 0 : ssd->titlebar.height;
+	int full_height = height + theme->border_width * 2 + titlebar_height;
 	int full_width = width + 2 * theme->border_width;
 	int border_width = MAX(rc.resize_minimum_area, theme->border_width);
 	int extended_area = MAX(0, rc.resize_minimum_area - theme->border_width);
 
 	/* Make sure we update the y offset based on titlebar shown / hidden */
 	wlr_scene_node_set_position(&ssd->extents.tree->node,
-		-border_width, -(ssd->titlebar.height + border_width));
+		-border_width, -(titlebar_height + border_width));
 
 	/*
 	 * Convert all output usable areas that the

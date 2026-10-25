@@ -14,6 +14,7 @@ struct scaled_icon_buffer {
 	struct wlr_scene_buffer *scene_buffer;
 	/* for window icon */
 	struct view *view;
+	bool client_only;
 	char *view_app_id;
 	char *view_icon_name;
 	bool view_icon_prefer_client;
@@ -38,6 +39,10 @@ struct scaled_icon_buffer {
  * wlr_scene_buffer (or one of its parents) is being destroyed.
  */
 struct scaled_icon_buffer *scaled_icon_buffer_create(
+	struct wlr_scene_tree *parent, int width, int height);
+/* Client-provided pixels, with a built-in application icon when absent.
+ * Does not require filesystem icon lookup or libsfdo. */
+struct scaled_icon_buffer *scaled_icon_buffer_create_client(
 	struct wlr_scene_tree *parent, int width, int height);
 
 void scaled_icon_buffer_set_view(struct scaled_icon_buffer *self,

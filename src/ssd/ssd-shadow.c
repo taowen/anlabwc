@@ -202,6 +202,9 @@ ssd_shadow_create(struct ssd *ssd)
 	assert(!ssd->shadow.tree);
 
 	ssd->shadow.tree = lab_wlr_scene_tree_create(ssd->tree);
+	if (ssd->spatial) {
+		return;
+	}
 
 	struct theme *theme = rc.theme;
 	struct view *view = ssd->view;
@@ -254,6 +257,9 @@ ssd_shadow_update(struct ssd *ssd)
 {
 	assert(ssd);
 	assert(ssd->shadow.tree);
+	if (ssd->spatial) {
+		return;
+	}
 
 	struct view *view = ssd->view;
 	struct theme *theme = rc.theme;

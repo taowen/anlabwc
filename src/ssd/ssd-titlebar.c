@@ -26,6 +26,10 @@ static void update_visible_buttons(struct ssd *ssd);
 void
 ssd_titlebar_create(struct ssd *ssd)
 {
+	if (ssd->spatial) {
+		ssd_spatial_create(ssd);
+		return;
+	}
 	struct view *view = ssd->view;
 	struct theme *theme = rc.theme;
 	int width = view->current.width;
@@ -270,6 +274,10 @@ update_visible_buttons(struct ssd *ssd)
 void
 ssd_titlebar_update(struct ssd *ssd)
 {
+	if (ssd->spatial) {
+		ssd_spatial_update(ssd);
+		return;
+	}
 	struct view *view = ssd->view;
 	int width = view->current.width;
 	int corner_width = ssd_get_corner_width();
@@ -436,6 +444,10 @@ void
 ssd_update_title(struct ssd *ssd)
 {
 	if (!ssd || !rc.show_title) {
+		return;
+	}
+	if (ssd->spatial) {
+		ssd_spatial_update_title(ssd);
 		return;
 	}
 

@@ -95,6 +95,9 @@ ssd_get_resizing_type(const struct ssd *ssd, struct wlr_cursor *cursor)
 	if (!view || !cursor || !view->ssd_mode || view->fullscreen) {
 		return LAB_NODE_NONE;
 	}
+	if (ssd->spatial) {
+		return ssd_spatial_context(ssd, cursor);
+	}
 
 	struct wlr_box view_box = view->current;
 	view_box.height = view_effective_height(view, /* use_pending */ false);
@@ -146,6 +149,7 @@ ssd_create(struct view *view, bool active)
 	struct ssd *ssd = znew(*ssd);
 
 	ssd->view = view;
+	ssd->spatial = ssd_spatial_style_enabled();
 	ssd->tree = lab_wlr_scene_tree_create(view->scene_tree);
 
 	/*
@@ -279,6 +283,7 @@ ssd_destroy(struct ssd *ssd)
 	}
 
 	/* Destroy subcomponents */
+	ssd_spatial_finish(ssd);
 	ssd_titlebar_destroy(ssd);
 	ssd_border_destroy(ssd);
 	ssd_extents_destroy(ssd);

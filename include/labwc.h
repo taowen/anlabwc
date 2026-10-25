@@ -77,6 +77,7 @@ struct seat {
 	 * - validate view move/resize requests from CSD clients
 	 */
 	struct cursor_context_saved pressed;
+	double pressed_cursor_x, pressed_cursor_y;
 
 	/* Cursor context of the last cursor motion */
 	struct cursor_context_saved last_cursor_ctx;
@@ -133,6 +134,7 @@ struct seat {
 
 	struct wl_listener touch_down;
 	struct wl_listener touch_up;
+	struct wl_listener touch_cancel;
 	struct wl_listener touch_motion;
 	struct wl_listener touch_frame;
 

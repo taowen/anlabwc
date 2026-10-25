@@ -36,6 +36,7 @@
 #include "input/ime.h"
 #include "labwc.h"
 #include "menu/menu.h"
+#include "ssd.h"
 #include "theme.h"
 #include "view.h"
 
@@ -46,6 +47,12 @@
 
 static void (*input_focus)(int);
 static int (*activation_permission)(int);
+
+void
+anlabwc_configure_spatial_decorations(int enabled)
+{
+	ssd_set_spatial_style(enabled != 0);
+}
 
 void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int)) {
 	input_focus = callback; /* configured before the compositor thread starts */
@@ -686,7 +693,7 @@ write_embed_rc(const char *runtime_dir)
 		wlr_log(WLR_ERROR, "write %s: %s", path, strerror(errno));
 		return;
 	}
-	fputs(
+	fprintf(f,
 		"<?xml version=\"1.0\"?>\n"
 		"<labwc_config>\n"
 		"  <core>\n"
@@ -694,22 +701,26 @@ write_embed_rc(const char *runtime_dir)
 		"    <xwaylandPersistence>yes</xwaylandPersistence>\n"
 		"  </core>\n"
 		"  <theme>\n"
-		"    <font place=\"ActiveWindow\" name=\"sans\" size=\"12\"/>\n"
-		"    <font place=\"InactiveWindow\" name=\"sans\" size=\"12\"/>\n"
+		"    <font place=\"ActiveWindow\" name=\"sans\" size=\"%d\"/>\n"
+		"    <font place=\"InactiveWindow\" name=\"sans\" size=\"%d\"/>\n"
 		"    <titlebar>\n"
-		"      <layout>menu:iconify,max,close</layout>\n"
+		"      <layout>%s</layout>\n"
 		"      <showTitle>yes</showTitle>\n"
 		"    </titlebar>\n"
 		"  </theme>\n"
 		"  <mouse>\n"
 		"    <default />\n"
-		"    <context name=\"Titlebar\">\n"
-		"      <mousebind button=\"Left\" action=\"Drag\">\n"
-		"        <action name=\"Move\"/>\n"
-		"      </mousebind>\n"
-		"    </context>\n"
+		"%s"
 		"  </mouse>\n"
-		"</labwc_config>\n", f);
+		"</labwc_config>\n",
+		ssd_spatial_style_enabled() ? 14 : 12,
+		ssd_spatial_style_enabled() ? 14 : 12,
+		ssd_spatial_style_enabled() ? ":close" : "menu:iconify,max,close",
+		ssd_spatial_style_enabled()
+			? "    <context name=\"Close\">\n"
+			  "      <mousebind button=\"Left\" action=\"Drag\"><action name=\"Move\"/></mousebind>\n"
+			  "    </context>\n"
+			: "");
 	fclose(f);
 	wlr_log(WLR_INFO, "embed rc.xml %s", path);
 }
