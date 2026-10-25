@@ -431,19 +431,6 @@ handle_request_set_primary_selection(struct wl_listener *listener, void *data)
 		event->serial);
 }
 
-#if HAVE_ANDROID_EMBED
-static void
-handle_set_primary_selection(struct wl_listener *listener, void *data)
-{
-	(void)data;
-	struct seat *seat = wl_container_of(
-		listener, seat, set_primary_selection);
-	(void)seat;
-	anlabwc_embed_note_primary_selection();
-	wlr_log(WLR_DEBUG, "embedded primary selection changed");
-}
-#endif
-
 static void
 process_cursor_move(uint32_t time)
 {
@@ -1327,11 +1314,6 @@ cursor_process_button_press(struct seat *seat, uint32_t button, uint32_t time_ms
 {
 	struct cursor_context ctx = get_cursor_context();
 
-#if HAVE_ANDROID_EMBED
-	anlabwc_embed_set_window_transform_ready(button == 0x110
-		&& (ctx.type == LAB_NODE_TITLEBAR || ctx.type == LAB_NODE_TITLE));
-#endif
-
 	/* Used on next button release to check if it can close menu or select menu item */
 	press_msec = time_msec;
 
@@ -1406,10 +1388,6 @@ cursor_process_button_release(struct seat *seat, uint32_t button,
 
 	/* Always notify button release event when it's not bound */
 	const bool notify = !lab_set_contains(&seat->bound_buttons, button);
-
-#if HAVE_ANDROID_EMBED
-	anlabwc_embed_set_window_transform_ready(false);
-#endif
 
 	cursor_context_save(&seat->pressed, NULL);
 
@@ -1850,9 +1828,6 @@ cursor_init(struct seat *seat)
 	CONNECT_SIGNAL(cursor_shape_manager, seat, request_set_shape);
 	CONNECT_SIGNAL(seat->wlr_seat, seat, request_set_selection);
 	CONNECT_SIGNAL(seat->wlr_seat, seat, request_set_primary_selection);
-#if HAVE_ANDROID_EMBED
-	CONNECT_SIGNAL(seat->wlr_seat, seat, set_primary_selection);
-#endif
 }
 
 void cursor_finish(struct seat *seat)
@@ -1875,9 +1850,6 @@ void cursor_finish(struct seat *seat)
 	wl_list_remove(&seat->request_set_shape.link);
 	wl_list_remove(&seat->request_set_selection.link);
 	wl_list_remove(&seat->request_set_primary_selection.link);
-#if HAVE_ANDROID_EMBED
-	wl_list_remove(&seat->set_primary_selection.link);
-#endif
 
 	wlr_xcursor_manager_destroy(seat->xcursor_manager);
 	wlr_cursor_destroy(seat->cursor);

@@ -342,12 +342,10 @@ avoid_edge_rounding_issues(struct cursor_context *ctx)
 
 /* TODO: make this less big and scary */
 struct cursor_context
-get_cursor_context_at(double lx, double ly)
+get_cursor_context(void)
 {
 	struct cursor_context ret = {.type = LAB_NODE_NONE};
-	struct wlr_cursor cursor = *server.seat.cursor;
-	cursor.x = lx;
-	cursor.y = ly;
+	struct wlr_cursor *cursor = server.seat.cursor;
 
 	/* Prevent drag icons to be on top of the hitbox detection */
 	if (server.seat.drag.active) {
@@ -356,7 +354,7 @@ get_cursor_context_at(double lx, double ly)
 
 	struct wlr_scene_node *node =
 		wlr_scene_node_at(&server.scene->tree.node,
-			cursor.x, cursor.y, &ret.sx, &ret.sy);
+			cursor->x, cursor->y, &ret.sx, &ret.sy);
 
 	if (server.seat.drag.active) {
 		dnd_icons_show(&server.seat, true);
@@ -437,7 +435,7 @@ get_cursor_context_at(double lx, double ly)
 				 * types, which are mapped to mouse contexts
 				 * like Left and TLCorner.
 				 */
-				ret.type = ssd_get_resizing_type(ret.view->ssd, &cursor);
+				ret.type = ssd_get_resizing_type(ret.view->ssd, cursor);
 				if (ret.type == LAB_NODE_NONE) {
 					/*
 					 * If cursor is not on border/extents,
@@ -466,11 +464,3 @@ get_cursor_context_at(double lx, double ly)
 	 */
 	return ret;
 }
-
-struct cursor_context
-get_cursor_context(void)
-{
-	return get_cursor_context_at(server.seat.cursor->x,
-		server.seat.cursor->y);
-}
-

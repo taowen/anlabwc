@@ -31,9 +31,6 @@ void anlabwc_report_input_focus(int pid);
 /* NULL suspends scanout without destroying clients; called outside the event loop. */
 ANLABWC_API int anlabwc_set_window(struct ANativeWindow *window, int width, int height);
 ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
-/* Logical hand id: 0 is right, 1 is left; Android owns cursor rendering. */
-ANLABWC_API int anlabwc_pointer_v2(int pointer_id, float x, float y,
-	int button, int pressed);
 ANLABWC_API int anlabwc_relative_pointer(float dx, float dy, int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);
 ANLABWC_API int anlabwc_pointer_locked(void);
@@ -45,17 +42,6 @@ ANLABWC_API int anlabwc_pointer_locked(void);
 ANLABWC_API int anlabwc_cursor_image(uint32_t *pixels, int capacity,
 	int *width, int *height, int *hotspot_x, int *hotspot_y,
 	uint32_t *serial);
-/* Increments whenever the seat's primary text selection changes. */
-ANLABWC_API uint32_t anlabwc_primary_selection_serial(void);
-/* True while the compositor owns the pointer for window move or resize. */
-ANLABWC_API int anlabwc_window_grab_active(void);
-/* 0=none, 1=move, 2=resize. Mirrors the compositor input mode. */
-ANLABWC_API int anlabwc_window_grab_mode(void);
-/* Cursor shape for resizing the currently grabbed window at (x, y), or 1. */
-ANLABWC_API int anlabwc_window_resize_shape(float x, float y);
-/* action: 1=begin, 2=update, 3=end. Coordinates are compositor pixels. */
-ANLABWC_API int anlabwc_window_transform(int action, float anchor_x,
-	float anchor_y, float focus_x, float focus_y);
 ANLABWC_API int anlabwc_axis(float dx, float dy);
 /* Touch contacts in output pixels: 0=down, 1=up, 2=move, 3=cancel. */
 ANLABWC_API int anlabwc_touch(int id, int action, float x, float y);

@@ -934,11 +934,6 @@ seat_focus_override_begin(struct seat *seat, enum input_mode input_mode,
 	assert(server.input_mode == LAB_INPUT_STATE_PASSTHROUGH);
 
 	server.input_mode = input_mode;
-#if HAVE_ANDROID_EMBED
-	anlabwc_embed_set_window_grab(
-		input_mode == LAB_INPUT_STATE_MOVE ? 1
-		: input_mode == LAB_INPUT_STATE_RESIZE ? 2 : 0);
-#endif
 
 	seat->focus_override.surface = seat->wlr_seat->keyboard_state.focused_surface;
 	if (seat->focus_override.surface) {
@@ -958,9 +953,6 @@ void
 seat_focus_override_end(struct seat *seat, bool restore_focus)
 {
 	server.input_mode = LAB_INPUT_STATE_PASSTHROUGH;
-#if HAVE_ANDROID_EMBED
-	anlabwc_embed_set_window_grab(0);
-#endif
 
 	if (seat->focus_override.surface) {
 		if (restore_focus) {
