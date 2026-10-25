@@ -317,7 +317,7 @@ update_controls(struct ssd *ssd)
 		wlr_scene_node_set_enabled(&title->scene_buffer->node, rc.show_title && available > 0);
 		if (available > 0 && (ssd->spatial_frame.title_dirty || width != ssd->spatial_frame.width)) {
 			const float color[] = {0.16, 0.20, 0.25, 1};
-			const float transparent[] = {0};
+			const float transparent[4] = {0};
 			scaled_font_buffer_update(title, ssd->view->title, available,
 				active ? &rc.font_activewindow : &rc.font_inactivewindow, color, transparent);
 		}
