@@ -1,4 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
+#ifdef __ANDROID__
+#include "anlabwc-embed.h"
+#endif
 #include <assert.h>
 #include <stdbool.h>
 #include <strings.h>
@@ -627,6 +630,9 @@ handle_focus_change(struct wl_listener *listener, void *data)
 	struct wlr_seat_keyboard_focus_change_event *event = data;
 	struct wlr_surface *surface = event->new_surface;
 	struct view *view = surface ? view_from_wlr_surface(surface) : NULL;
+#ifdef __ANDROID__
+	anlabwc_report_input_focus(view && view->impl->get_pid ? view->impl->get_pid(view) : 0);
+#endif
 
 	/*
 	 * Prevent focus switch to non-view surface (e.g. layer-shell

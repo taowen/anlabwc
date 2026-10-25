@@ -224,6 +224,10 @@ handle_request_activate(struct wl_listener *listener, void *data)
 	 * https://github.com/labwc/labwc/discussions/2821 for more info.
 	 */
 	struct view *view = server.active_view;
+	if (view && view->fullscreen && view->type != LAB_XWAYLAND_VIEW) {
+		wlr_log(WLR_DEBUG, "Denied unmanaged background activation over fullscreen Wayland task");
+		return;
+	}
 	if (view && view->type == LAB_XWAYLAND_VIEW) {
 		struct wlr_xwayland_surface *surf =
 			wlr_xwayland_surface_try_from_wlr_surface(view->surface);

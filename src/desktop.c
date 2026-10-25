@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #include "config.h"
+#ifdef __ANDROID__
+#include "anlabwc-embed.h"
+#endif
 #include <assert.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_layer_shell_v1.h>
@@ -175,6 +178,23 @@ void
 desktop_focus_view(struct view *view, bool raise)
 {
 	desktop_focus_view_internal(view, raise, /*allow_delay*/ false);
+}
+
+void
+desktop_request_activation(struct view *view, bool user_initiated)
+{
+#ifdef __ANDROID__
+	struct view *focused = server.active_view;
+	pid_t pid = view->impl->get_pid ? view->impl->get_pid(view) : 0;
+	pid_t focused_pid = focused && focused->impl->get_pid ? focused->impl->get_pid(focused) : 0;
+	if (!user_initiated && focused && !(pid > 0 && pid == focused_pid) && view_get_root(view) != view_get_root(focused) &&
+			!anlabwc_permit_activation(pid)) {
+		wlr_log(WLR_DEBUG, "Denied activation without user intent");
+		return;
+	}
+#endif
+
+	desktop_focus_view(view, /*raise*/ true);
 }
 
 /* TODO: focus layer-shell surfaces also? */

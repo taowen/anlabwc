@@ -253,7 +253,7 @@ view_matches_query(struct view *view, struct view_query *query)
 	return true;
 }
 
-static struct view *
+struct view *
 view_get_root(struct view *view)
 {
 	assert(view);

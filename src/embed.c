@@ -44,6 +44,22 @@
 #include <android/native_window.h>
 #endif
 
+static void (*input_focus)(int);
+static int (*activation_permission)(int);
+
+void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int)) {
+	input_focus = callback; /* configured before the compositor thread starts */
+	activation_permission = activation;
+}
+
+int anlabwc_permit_activation(int pid) {
+	return activation_permission ? activation_permission(pid) : 1;
+}
+
+void anlabwc_report_input_focus(int pid) {
+	if (input_focus) input_focus(pid);
+}
+
 enum {
 	EMBED_PTR_MOTION = 1,
 	EMBED_PTR_BUTTON,

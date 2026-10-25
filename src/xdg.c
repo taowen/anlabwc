@@ -4,6 +4,7 @@
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 #include <wlr/types/wlr_scene.h>
+#include <wlr/types/wlr_seat.h>
 #include <wlr/types/wlr_xdg_activation_v1.h>
 #include <wlr/types/wlr_xdg_dialog_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
@@ -928,7 +929,7 @@ static const struct view_impl xdg_toplevel_view_impl = {
 };
 
 struct token_data {
-	bool had_valid_surface;
+	bool user_initiated;
 	bool had_valid_seat;
 	struct wl_listener destroy;
 };
@@ -946,7 +947,13 @@ handle_xdg_activation_new_token(struct wl_listener *listener, void *data)
 {
 	struct wlr_xdg_activation_token_v1 *token = data;
 	struct token_data *token_data = znew(*token_data);
-	token_data->had_valid_surface = !!token->surface;
+	struct wlr_seat_client *source_client = token->seat && token->surface
+		? wlr_seat_client_for_wl_client(token->seat,
+			wl_resource_get_client(token->surface->resource)) : NULL;
+	token_data->user_initiated = source_client &&
+		(token->seat->keyboard_state.focused_surface == token->surface ||
+		 token->seat->pointer_state.focused_surface == token->surface) &&
+		wlr_seat_client_validate_event_serial(source_client, token->serial);
 	token_data->had_valid_seat = !!token->seat;
 	token->data = token_data;
 
@@ -973,22 +980,12 @@ handle_xdg_activation_request(struct wl_listener *listener, void *data)
 		return;
 	}
 
+#ifndef __ANDROID__
 	if (!token_data->had_valid_seat) {
 		wlr_log(WLR_INFO, "Denying focus request, seat wasn't supplied");
 		return;
 	}
-
-	/*
-	 * TODO: The verification of source surface is temporarily disabled to
-	 * allow activation of some clients (e.g. thunderbird). Reland this
-	 * check when we implement the configuration for activation policy or
-	 * urgency hints.
-	 *
-	 * if (!token_data->had_valid_surface) {
-	 *	wlr_log(WLR_INFO, "Denying focus request, source surface not set");
-	 *	return;
-	 * }
-	 */
+#endif
 
 	if (window_rules_get_property(view, "ignoreFocusRequest") == LAB_PROP_TRUE) {
 		wlr_log(WLR_INFO, "Ignoring focus request due to window rule configuration");
@@ -996,7 +993,7 @@ handle_xdg_activation_request(struct wl_listener *listener, void *data)
 	}
 
 	wlr_log(WLR_DEBUG, "Activating surface");
-	desktop_focus_view(view, /*raise*/ true);
+	desktop_request_activation(view, token_data->user_initiated);
 }
 
 /*

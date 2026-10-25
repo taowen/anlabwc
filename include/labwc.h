@@ -377,6 +377,8 @@ void xdg_shell_finish(void);
  * session is locked; it will simply do nothing.
  */
 void desktop_focus_view(struct view *view, bool raise);
+/* Client activation, distinct from explicit shell/user focus operations. */
+void desktop_request_activation(struct view *view, bool user_initiated);
 
 /**
  * desktop_cancel_pending_auto_raise() - cancel any pending delayed auto-raise

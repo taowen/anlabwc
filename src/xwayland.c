@@ -524,7 +524,7 @@ handle_request_activate(struct wl_listener *listener, void *data)
 		return;
 	}
 
-	desktop_focus_view(view, /*raise*/ true);
+	desktop_request_activation(view, /*user_initiated*/ false);
 }
 
 static void

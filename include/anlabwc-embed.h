@@ -25,6 +25,9 @@ struct ANativeWindow;
 ANLABWC_API int anlabwc_run(struct ANativeWindow *window, int width, int height,
 	const char *runtime_dir);
 ANLABWC_API void anlabwc_request_stop(void);
+ANLABWC_API void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int));
+int anlabwc_permit_activation(int pid);
+void anlabwc_report_input_focus(int pid);
 /* NULL suspends scanout without destroying clients; called outside the event loop. */
 ANLABWC_API int anlabwc_set_window(struct ANativeWindow *window, int width, int height);
 ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);

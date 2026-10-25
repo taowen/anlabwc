@@ -334,6 +334,8 @@ struct xdg_toplevel_view {
  * wlr_surface, or NULL if the surface has no associated view.
  */
 struct view *view_from_wlr_surface(struct wlr_surface *surface);
+/* Root of a transient/owned window family. */
+struct view *view_get_root(struct view *view);
 
 /**
  * view_query_create() - Create a new heap allocated view query with
