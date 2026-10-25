@@ -71,6 +71,7 @@ enum {
 	EMBED_WINDOW_RESIZE_SHAPE,
 	EMBED_WINDOW_TRANSFORM,
 	EMBED_PTR_RELATIVE,
+	EMBED_DESKTOP_WINDOW,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -118,6 +119,68 @@ struct transform_request {
 	sem_t done;
 	atomic_int refs;
 };
+
+struct desktop_request {
+	uint64_t id;
+	int action, result, count;
+	char **values;
+	sem_t done;
+	atomic_int refs;
+	atomic_bool cancelled;
+};
+
+static void desktop_request_release(struct desktop_request *request)
+{
+	if (atomic_fetch_sub(&request->refs, 1) != 1) return;
+	for (int i = 0; i < request->count; i++) free(request->values[i]);
+	free(request->values);
+	sem_destroy(&request->done);
+	free(request);
+}
+
+static void desktop_request_dispatch(struct desktop_request *request)
+{
+	if (atomic_load(&request->cancelled)) return;
+	request->result = -ENOENT;
+	if (request->action == 0) {
+		int count = 0;
+		struct view *view;
+		wl_list_for_each(view, &server.views, link)
+			if (view->mapped || view->minimized) count += 7;
+		request->values = calloc(count ? count : 1, sizeof(char *));
+		if (!request->values) { request->result = -ENOMEM; return; }
+		wl_list_for_each(view, &server.views, link) {
+			if (!view->mapped && !view->minimized) continue;
+			char id[32], pid[32];
+			snprintf(id, sizeof(id), "%llx", (unsigned long long)view->creation_id + 1);
+			snprintf(pid, sizeof(pid), "%d", view->impl->get_pid ? view->impl->get_pid(view) : 0);
+			const char *fields[] = {id, pid, view->title, view->app_id,
+				view == server.active_view ? "1" : "0",
+				view->maximized ? "1" : "0", view->fullscreen ? "1" : "0"};
+			for (int i = 0; i < 7; i++) {
+				char *value = strdup(fields[i]);
+				if (!value) { request->result = -ENOMEM; return; }
+				request->values[request->count++] = value;
+			}
+		}
+		request->result = 0;
+		return;
+	}
+	struct view *view;
+	wl_list_for_each(view, &server.views, link) {
+		if (view->creation_id + 1 != request->id || (!view->mapped && !view->minimized)) continue;
+		switch (request->action) {
+		case 1: desktop_request_activation(view, true); break;
+		case 2: view_close(view); break;
+		case 3:
+			if (view->fullscreen) view_set_fullscreen(view, false);
+			else view_set_maximized(view, view->maximized ? VIEW_AXIS_NONE : VIEW_AXIS_BOTH);
+			break;
+		}
+		request->result = 0;
+		return;
+	}
+}
 
 static void window_request_release(struct window_request *request) {
 	if (atomic_fetch_sub(&request->refs, 1) != 1) return;
@@ -609,6 +672,13 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	switch (msg.type) {
+	case EMBED_DESKTOP_WINDOW: {
+		struct desktop_request *request = (struct desktop_request *)msg.request;
+		desktop_request_dispatch(request);
+		sem_post(&request->done);
+		desktop_request_release(request);
+		break;
+	}
 	case EMBED_PTR_RELATIVE:
 		wlr_android_pointer_relative(server.embed.android, msg.x, msg.y);
 		if (msg.button && msg.pressed >= 0) {
@@ -693,6 +763,37 @@ ANLABWC_API int
 anlabwc_pointer(float x, float y, int button, int pressed)
 {
 	return anlabwc_pointer_v2(EMBED_RIGHT_HAND, x, y, button, pressed);
+}
+
+ANLABWC_API int
+anlabwc_window_request(uint64_t id, int action, char ***values, int *count)
+{
+	if (action < 0 || action > 3 || !values || !count) return -EINVAL;
+	*values = NULL; *count = 0;
+	struct desktop_request *request = calloc(1, sizeof(*request));
+	if (!request) return -ENOMEM;
+	if (sem_init(&request->done, 0, 0)) { free(request); return -errno; }
+	atomic_init(&request->refs, 2);
+	atomic_init(&request->cancelled, false);
+	request->id = id; request->action = action;
+	struct embed_msg msg = {.type = EMBED_DESKTOP_WINDOW, .request = (uintptr_t)request};
+	int result = send_msg(&msg);
+	if (result == 0) {
+		struct timespec deadline;
+		clock_gettime(CLOCK_REALTIME, &deadline);
+		deadline.tv_sec += 2;
+		int rc;
+		do { rc = sem_timedwait(&request->done, &deadline); } while (rc < 0 && errno == EINTR);
+		if (rc == 0) {
+			result = request->result;
+			if (result == 0) {
+				*values = request->values; *count = request->count;
+				request->values = NULL; request->count = 0;
+			}
+		} else { atomic_store(&request->cancelled, true); result = -ETIMEDOUT; }
+	} else desktop_request_release(request);
+	desktop_request_release(request);
+	return result;
 }
 
 ANLABWC_API int

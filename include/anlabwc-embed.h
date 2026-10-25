@@ -63,6 +63,10 @@ ANLABWC_API int anlabwc_key(int evdev, int pressed);
 /* UTF-32 codepoint. Looks up the current XKB map (US + Shift). */
 ANLABWC_API int anlabwc_unicode(uint32_t codepoint);
 ANLABWC_API const char *anlabwc_wayland_socket(void);
+/* action: 0=list, 1=focus, 2=close, 3=maximize/restore. Window IDs are creation IDs.
+ * List returns seven strings per view: ID, PID, title, app_id, focused,
+ * maximized, fullscreen. Caller frees every string and the returned array. */
+ANLABWC_API int anlabwc_window_request(uint64_t id, int action, char ***values, int *count);
 
 #ifdef __cplusplus
 }
