@@ -16,6 +16,39 @@
 #include "view.h"
 #include "window-rules.h"
 
+static struct wl_list icons = {&icons, &icons};
+static void (*resolve_icon)(uint64_t, const char *, const char *);
+
+void
+scaled_icon_buffer_configure_resolver(void (*request)(uint64_t, const char *, const char *))
+{
+	resolve_icon = request;
+}
+
+void
+scaled_icon_buffer_resolve(uint64_t id, const char *app_id, struct lab_data_buffer *buffer)
+{
+	struct scaled_icon_buffer *self;
+	wl_list_for_each(self, &icons, link) {
+		if (!self->client_only || !self->view || self->view->creation_id + 1 != id
+				|| !str_equal(self->view_app_id, app_id)) continue;
+		if (self->resolved_icon) wlr_buffer_unlock(&self->resolved_icon->base);
+		self->resolved_icon = buffer;
+		wlr_buffer_lock(&buffer->base);
+		scaled_buffer_request_update(self->scaled_buffer, self->width, self->height);
+	}
+}
+
+static void
+request_icon(struct scaled_icon_buffer *self)
+{
+	if (self->client_only && self->view && resolve_icon
+			&& self->view_app_id && self->view_app_id[0]
+			&& !self->view_icon_buffers.size && !self->resolved_icon) {
+		resolve_icon(self->view->creation_id + 1, self->view_app_id, self->view_icon_name);
+	}
+}
+
 static struct lab_data_buffer *
 choose_best_icon_buffer(struct scaled_icon_buffer *self, int icon_size, double scale)
 {
@@ -100,6 +133,10 @@ client_icon_buffer(struct scaled_icon_buffer *self, double scale)
 		MIN(self->width, self->height), scale);
 	if (client) {
 		return buffer_resize(client, self->width, self->height, scale);
+	}
+
+	if (self->resolved_icon) {
+		return buffer_resize(self->resolved_icon, self->width, self->height, scale);
 	}
 
 	/* A neutral application symbol, rather than a non-functional menu icon. */
@@ -210,6 +247,8 @@ _destroy(struct scaled_buffer *scaled_buffer)
 		wl_list_remove(&self->on_view.new_app_id.link);
 		wl_list_remove(&self->on_view.destroy.link);
 	}
+	wl_list_remove(&self->link);
+	if (self->resolved_icon) wlr_buffer_unlock(&self->resolved_icon->base);
 	free(self->view_app_id);
 	free(self->view_icon_name);
 	set_icon_buffers(self, NULL);
@@ -235,6 +274,7 @@ _equal(struct scaled_buffer *scaled_buffer_a,
 
 	return str_equal(a->view_app_id, b->view_app_id)
 		&& a->client_only == b->client_only
+		&& a->resolved_icon == b->resolved_icon
 		&& a->view_icon_prefer_client == b->view_icon_prefer_client
 		&& str_equal(a->view_icon_name, b->view_icon_name)
 		&& icon_buffers_equal(&a->view_icon_buffers, &b->view_icon_buffers)
@@ -258,6 +298,7 @@ scaled_icon_buffer_create(struct wlr_scene_tree *parent, int width, int height)
 	struct scaled_buffer *scaled_buffer = scaled_buffer_create(
 		parent, &impl, /* drop_buffer */ true);
 	struct scaled_icon_buffer *self = znew(*self);
+	wl_list_insert(&icons, &self->link);
 	self->scaled_buffer = scaled_buffer;
 	self->scene_buffer = scaled_buffer->scene_buffer;
 	self->width = width;
@@ -290,6 +331,10 @@ handle_view_set_icon(struct wl_listener *listener, void *data)
 	}
 
 	if (!icon_name_equal) {
+		if (self->resolved_icon) {
+			wlr_buffer_unlock(&self->resolved_icon->base);
+			self->resolved_icon = NULL;
+		}
 		zfree(self->view_icon_name);
 		if (self->view->icon.name) {
 			xstrdup_replace(self->view_icon_name, self->view->icon.name);
@@ -297,6 +342,7 @@ handle_view_set_icon(struct wl_listener *listener, void *data)
 	}
 
 	set_icon_buffers(self, &self->view->icon.buffers);
+	request_icon(self);
 	scaled_buffer_request_update(self->scaled_buffer,
 		self->width, self->height);
 }
@@ -328,7 +374,12 @@ handle_view_new_app_id(struct wl_listener *listener, void *data)
 		return;
 	}
 
+	if (self->resolved_icon) {
+		wlr_buffer_unlock(&self->resolved_icon->base);
+		self->resolved_icon = NULL;
+	}
 	xstrdup_replace(self->view_app_id, app_id);
+	request_icon(self);
 	self->view_icon_prefer_client = window_rules_get_property(
 		self->view, "iconPreferClient") == LAB_PROP_TRUE;
 	scaled_buffer_request_update(self->scaled_buffer,

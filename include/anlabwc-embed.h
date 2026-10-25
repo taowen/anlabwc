@@ -28,6 +28,11 @@ ANLABWC_API void anlabwc_request_stop(void);
 ANLABWC_API void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int));
 /* Opt in before run; other embedders retain the standard decorations. */
 ANLABWC_API void anlabwc_configure_spatial_decorations(int enabled);
+/* Optional asynchronous icon resolver. Called on the event thread; return promptly.
+ * Supply premultiplied ARGB pixels from another thread. Client pixels take priority. */
+ANLABWC_API void anlabwc_configure_icon_resolver(void (*request)(uint64_t, const char *, const char *));
+ANLABWC_API int anlabwc_resolve_window_icon(uint64_t id, const char *app_id,
+	const uint32_t *pixels, int width, int height);
 int anlabwc_permit_activation(int pid);
 void anlabwc_report_input_focus(int pid);
 /* NULL suspends scanout without destroying clients; called outside the event loop. */

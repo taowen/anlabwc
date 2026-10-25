@@ -65,7 +65,7 @@ ssd_spatial_configure_theme(struct theme *theme)
 	theme->border_width = FRAME_PADDING;
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
-		float alpha = active ? 0.18f : 0.10f;
+		float alpha = active ? 0.045f : 0.025f;
 		float color[] = {0.91f * alpha, 0.93f * alpha, 0.95f * alpha, alpha};
 		for (int i = 0; i < 4; ++i) {
 			theme->window[active].border_color[i] = color[i];
@@ -235,6 +235,24 @@ ssd_spatial_border_update(struct ssd *ssd)
 		wlr_scene_node_set_position(&subtree->left->node, 0, 0);
 		wlr_scene_rect_set_size(subtree->right, FRAME_PADDING, height);
 		wlr_scene_node_set_position(&subtree->right->node, width + FRAME_PADDING, 0);
+
+		/* One opaque logical pixel outside the client separates dark content
+		 * from a dark desktop. It stays inside the faint, wider surround. */
+		const struct wlr_box lines[] = {
+			{FRAME_PADDING - 1, -1, width + 2, 1},
+			{FRAME_PADDING - 1, height, width + 2, 1},
+			{FRAME_PADDING - 1, 0, 1, height},
+			{FRAME_PADDING + width, 0, 1, height},
+		};
+		float color[] = {active ? 0.30f : 0.19f,
+			active ? 0.34f : 0.22f, active ? 0.40f : 0.26f, 1.0f};
+		for (int i = 0; i < 4; ++i) {
+			if (!subtree->outline[i]) {
+				subtree->outline[i] = lab_wlr_scene_rect_create(subtree->tree, 0, 0, color);
+			}
+			wlr_scene_rect_set_size(subtree->outline[i], lines[i].width, lines[i].height);
+			wlr_scene_node_set_position(&subtree->outline[i]->node, lines[i].x, lines[i].y);
+		}
 	}
 }
 

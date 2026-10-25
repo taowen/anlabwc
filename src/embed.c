@@ -39,6 +39,8 @@
 #include "ssd.h"
 #include "theme.h"
 #include "view.h"
+#include "buffer.h"
+#include "scaled-buffer/scaled-icon-buffer.h"
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -77,6 +79,7 @@ enum {
 	EMBED_WINDOW,
 	EMBED_PTR_RELATIVE,
 	EMBED_DESKTOP_WINDOW,
+	EMBED_WINDOW_ICON,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -108,6 +111,16 @@ struct window_request {
 	sem_t done;
 	atomic_int refs;
 };
+
+struct icon_request {
+	uint64_t id;
+	char *app_id;
+	struct lab_data_buffer *buffer;
+};
+
+void anlabwc_configure_icon_resolver(void (*request)(uint64_t, const char *, const char *)) {
+	scaled_icon_buffer_configure_resolver(request);
+}
 
 struct desktop_request {
 	uint64_t id;
@@ -462,6 +475,14 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	switch (msg.type) {
+	case EMBED_WINDOW_ICON: {
+		struct icon_request *request = (struct icon_request *)msg.request;
+		scaled_icon_buffer_resolve(request->id, request->app_id, request->buffer);
+		wlr_buffer_drop(&request->buffer->base);
+		free(request->app_id);
+		free(request);
+		break;
+	}
 	case EMBED_DESKTOP_WINDOW: {
 		struct desktop_request *request = (struct desktop_request *)msg.request;
 		desktop_request_dispatch(request);
@@ -522,6 +543,29 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 }
 
 ANLABWC_API int
+anlabwc_resolve_window_icon(uint64_t id, const char *app_id,
+		const uint32_t *pixels, int width, int height)
+{
+	if (!app_id || !pixels || width <= 0 || height <= 0 || width > 256 || height > 256) return -EINVAL;
+	struct icon_request *request = calloc(1, sizeof(*request));
+	uint32_t *copy = malloc((size_t)width * height * sizeof(*copy));
+	if (!request || !copy) { free(request); free(copy); return -ENOMEM; }
+	request->app_id = strdup(app_id);
+	if (!request->app_id) { free(request); free(copy); return -ENOMEM; }
+	memcpy(copy, pixels, (size_t)width * height * sizeof(*copy));
+	request->id = id;
+	request->buffer = buffer_create_from_data(copy, width, height, width * sizeof(*copy));
+	struct embed_msg msg = {.type = EMBED_WINDOW_ICON, .request = (uintptr_t)request};
+	int result = send_msg(&msg);
+	if (result < 0) {
+		wlr_buffer_drop(&request->buffer->base);
+		free(request->app_id);
+		free(request);
+	}
+	return result;
+}
+
+int
 anlabwc_window_request(uint64_t id, int action, char ***values, int *count)
 {
 	if (action < 0 || action > 3 || !values || !count) return -EINVAL;

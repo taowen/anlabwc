@@ -3,6 +3,7 @@
 #define LABWC_SCALED_ICON_BUFFER_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <wayland-server-core.h>
 
 struct wlr_scene_tree;
@@ -10,6 +11,8 @@ struct wlr_scene_node;
 struct wlr_scene_buffer;
 
 struct scaled_icon_buffer {
+	struct wl_list link;
+	struct lab_data_buffer *resolved_icon;
 	struct scaled_buffer *scaled_buffer;
 	struct wlr_scene_buffer *scene_buffer;
 	/* for window icon */
@@ -40,6 +43,9 @@ struct scaled_icon_buffer {
  */
 struct scaled_icon_buffer *scaled_icon_buffer_create(
 	struct wlr_scene_tree *parent, int width, int height);
+void scaled_icon_buffer_configure_resolver(void (*request)(uint64_t, const char *, const char *));
+void scaled_icon_buffer_resolve(uint64_t id, const char *app_id, struct lab_data_buffer *buffer);
+
 /* Client-provided pixels, with a built-in application icon when absent.
  * Does not require filesystem icon lookup or libsfdo. */
 struct scaled_icon_buffer *scaled_icon_buffer_create_client(
