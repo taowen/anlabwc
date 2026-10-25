@@ -65,8 +65,7 @@ ssd_spatial_configure_theme(struct theme *theme)
 	theme->border_width = FRAME_PADDING;
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
-		float alpha = active ? 0.045f : 0.025f;
-		float color[] = {0.91f * alpha, 0.93f * alpha, 0.95f * alpha, alpha};
+		float color[] = {0, 0, 0, 0};
 		for (int i = 0; i < 4; ++i) {
 			theme->window[active].border_color[i] = color[i];
 		}
@@ -237,7 +236,7 @@ ssd_spatial_border_update(struct ssd *ssd)
 		wlr_scene_node_set_position(&subtree->right->node, width + FRAME_PADDING, 0);
 
 		/* One opaque logical pixel outside the client separates dark content
-		 * from a dark desktop. It stays inside the faint, wider surround. */
+		 * from a dark desktop. It stays inside the invisible resize surround. */
 		const struct wlr_box lines[] = {
 			{FRAME_PADDING - 1, -1, width + 2, 1},
 			{FRAME_PADDING - 1, height, width + 2, 1},
