@@ -21,6 +21,8 @@
 #include <unistd.h>
 #include <wlr/backend/android.h>
 #include <wlr/types/wlr_cursor.h>
+#include <wlr/types/wlr_xdg_shell.h>
+#include "arlinux-window-v1-protocol.h"
 #include <wlr/types/wlr_keyboard.h>
 #include <wlr/types/wlr_keyboard_group.h>
 #include <wlr/util/log.h>
@@ -50,10 +52,53 @@
 static void (*input_focus)(int);
 static int (*activation_permission)(int);
 
+static void window_policy_destroy(struct wl_client *client, struct wl_resource *resource)
+{
+	(void)client;
+	wl_resource_destroy(resource);
+}
+
+static void window_policy_focus(struct wl_client *client, struct wl_resource *resource,
+		struct wl_resource *surface_resource, uint32_t enabled)
+{
+	pid_t pid;
+	wl_client_get_credentials(client, &pid, NULL, NULL);
+	struct wlr_surface *surface = wlr_surface_from_resource(surface_resource);
+	struct wlr_xdg_surface *xdg = wlr_xdg_surface_try_from_wlr_surface(surface);
+	struct view *view = xdg ? xdg->data : NULL;
+	if (pid != getpid() || wl_resource_get_client(surface_resource) != client ||
+			!view || view->been_mapped || enabled > 1) {
+		wl_resource_post_error(resource, 0, "Invalid host window policy request");
+		return;
+	}
+	view->inhibit_keyboard_focus = !enabled;
+}
+
+static const struct arlinux_window_manager_v1_interface window_policy_impl = {
+	.destroy = window_policy_destroy,
+	.set_keyboard_focus = window_policy_focus,
+};
+
+static void window_policy_bind(struct wl_client *client, void *data,
+		uint32_t version, uint32_t id)
+{
+	(void)data;
+	struct wl_resource *resource = wl_resource_create(client,
+		&arlinux_window_manager_v1_interface, version, id);
+	if (!resource) { wl_client_post_no_memory(client); return; }
+	wl_resource_set_implementation(resource, &window_policy_impl, NULL, NULL);
+}
+
 void
 anlabwc_configure_spatial_decorations(int enabled)
 {
 	ssd_set_spatial_style(enabled != 0);
+}
+
+static void (*ready_callback)(void);
+
+void anlabwc_configure_ready(void (*callback)(void)) {
+	ready_callback = callback;
 }
 
 void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int)) {
@@ -897,6 +942,8 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 
 	increase_nofile_limit();
 	server_init();
+	wl_global_create(server.wl_display, &arlinux_window_manager_v1_interface,
+		1, NULL, window_policy_bind);
 	server_start();
 	embed_cursor_init();
 
@@ -906,6 +953,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	menu_init();
 
 	running = true;
+	if (ready_callback) ready_callback();
 	wlr_log(WLR_INFO, "anlabwc running on %s (%dx%d)",
 		wayland_socket_path, width, height);
 	wl_display_run(server.wl_display);

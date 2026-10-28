@@ -358,6 +358,7 @@ enum view_wants_focus
 view_wants_focus(struct view *view)
 {
 	assert(view);
+	if (view->inhibit_keyboard_focus) return VIEW_WANTS_FOCUS_NEVER;
 	if (view->impl->wants_focus) {
 		return view->impl->wants_focus(view);
 	}

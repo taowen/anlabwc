@@ -135,6 +135,8 @@ struct view_impl {
 };
 
 struct view {
+	/* Embedded host capability; pointer interaction does not imply editor focus. */
+	bool inhibit_keyboard_focus;
 	enum view_type type;
 	const struct view_impl *impl;
 	struct wl_list link;

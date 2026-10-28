@@ -26,6 +26,8 @@ ANLABWC_API int anlabwc_run(struct ANativeWindow *window, int width, int height,
 	const char *runtime_dir);
 ANLABWC_API void anlabwc_request_stop(void);
 ANLABWC_API void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int));
+/* Called once after the embedded server is initialized and accepts clients. */
+ANLABWC_API void anlabwc_configure_ready(void (*callback)(void));
 /* Opt in before run; other embedders retain the standard decorations. */
 ANLABWC_API void anlabwc_configure_spatial_decorations(int enabled);
 /* Optional asynchronous icon resolver. Called on the event thread; return promptly.

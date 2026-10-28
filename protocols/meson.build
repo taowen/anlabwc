@@ -19,6 +19,7 @@ server_protocols = [
 ]
 if have_android_embed
 	server_protocols += dependency('arlinux-wsi-protocols', version: '>=0.4').get_variable('pkgdatadir') / 'wayland-android.xml'
+	server_protocols += dependency('arlinux-wsi-protocols', version: '>=0.4').get_variable('pkgdatadir') / 'arlinux-window-v1.xml'
 endif
 
 server_protos_src = []
