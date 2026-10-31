@@ -244,11 +244,21 @@ static atomic_uint cursor_shape = 1;
 static atomic_uint_fast64_t cursor_position = UINT64_MAX;
 static atomic_bool pointer_locked;
 static atomic_bool fullscreen_active;
+static void (*controls_visibility)(int);
+
+ANLABWC_API void
+anlabwc_configure_controls(void (*visibility)(int))
+{
+	controls_visibility = visibility;
+}
 
 void
 anlabwc_embed_set_fullscreen(bool fullscreen)
 {
-	atomic_store_explicit(&fullscreen_active, fullscreen, memory_order_relaxed);
+	bool previous = atomic_exchange_explicit(&fullscreen_active, fullscreen, memory_order_relaxed);
+	if (previous != fullscreen && controls_visibility) {
+		controls_visibility(!fullscreen);
+	}
 }
 
 ANLABWC_API int
