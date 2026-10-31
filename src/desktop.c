@@ -292,6 +292,7 @@ desktop_update_top_layer_visibility(void)
 	 * any views above it
 	 */
 	uint64_t outputs_covered = 0;
+	bool fullscreen = false;
 	for_each_view(view, &server.views, LAB_VIEW_CRITERIA_CURRENT_WORKSPACE) {
 		if (view->minimized) {
 			continue;
@@ -300,11 +301,17 @@ desktop_update_top_layer_visibility(void)
 			continue;
 		}
 		if (view->fullscreen && !(view->outputs & outputs_covered)) {
+			fullscreen = true;
 			wlr_scene_node_set_enabled(
 				&view->output->layer_tree[top]->node, false);
 		}
 		outputs_covered |= view->outputs;
 	}
+#if HAVE_ANDROID_EMBED
+	anlabwc_embed_set_fullscreen(fullscreen);
+#else
+	(void)fullscreen;
+#endif
 }
 
 /*

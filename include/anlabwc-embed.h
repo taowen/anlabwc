@@ -41,11 +41,12 @@ void anlabwc_report_input_focus(int pid);
 ANLABWC_API int anlabwc_set_window(struct ANativeWindow *window, int width, int height);
 /* Showing host controls restores fullscreen views on the compositor event thread. */
 ANLABWC_API int anlabwc_controls_visible(int visible);
+ANLABWC_API int anlabwc_fullscreen(void);
 ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
 ANLABWC_API int anlabwc_relative_pointer(float dx, float dy, int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);
 ANLABWC_API int anlabwc_pointer_locked(void);
-/* Packed desktop pixel coordinates (x in high 32 bits), UINT64_MAX before motion. */
+/* Packed desktop pixel coordinates (x in high 32 bits), UINT64_MAX before ready. */
 ANLABWC_API uint64_t anlabwc_cursor_position(void);
 /*
  * Copies the current client-provided cursor image as Android ARGB pixels.

@@ -149,6 +149,7 @@ embed_cursor_init(void)
 {
 	/* Android draws the pointer above the compositor Surface. */
 	cursor_set_visible(&server.seat, false);
+	anlabwc_embed_set_cursor_position(server.seat.cursor->x, server.seat.cursor->y);
 }
 
 struct window_request {
@@ -242,6 +243,19 @@ static volatile bool running;
 static atomic_uint cursor_shape = 1;
 static atomic_uint_fast64_t cursor_position = UINT64_MAX;
 static atomic_bool pointer_locked;
+static atomic_bool fullscreen_active;
+
+void
+anlabwc_embed_set_fullscreen(bool fullscreen)
+{
+	atomic_store_explicit(&fullscreen_active, fullscreen, memory_order_relaxed);
+}
+
+ANLABWC_API int
+anlabwc_fullscreen(void)
+{
+	return atomic_load_explicit(&fullscreen_active, memory_order_relaxed);
+}
 struct embed_cursor_image {
 	pthread_mutex_t lock;
 	uint32_t *pixels;
