@@ -300,8 +300,8 @@ desktop_update_top_layer_visibility(void)
 		if (!output_is_usable(view->output)) {
 			continue;
 		}
+		fullscreen |= view->fullscreen;
 		if (view->fullscreen && !(view->outputs & outputs_covered)) {
-			fullscreen = true;
 			wlr_scene_node_set_enabled(
 				&view->output->layer_tree[top]->node, false);
 		}
