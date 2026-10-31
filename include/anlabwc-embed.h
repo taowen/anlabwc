@@ -39,6 +39,8 @@ int anlabwc_permit_activation(int pid);
 void anlabwc_report_input_focus(int pid);
 /* NULL suspends scanout without destroying clients; called outside the event loop. */
 ANLABWC_API int anlabwc_set_window(struct ANativeWindow *window, int width, int height);
+/* Showing host controls restores fullscreen views on the compositor event thread. */
+ANLABWC_API int anlabwc_controls_visible(int visible);
 ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
 ANLABWC_API int anlabwc_relative_pointer(float dx, float dy, int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);

@@ -125,6 +125,7 @@ enum {
 	EMBED_PTR_RELATIVE,
 	EMBED_DESKTOP_WINDOW,
 	EMBED_WINDOW_ICON,
+	EMBED_CONTROLS_VISIBLE,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -534,6 +535,13 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	switch (msg.type) {
+	case EMBED_CONTROLS_VISIBLE: {
+		struct view *view;
+		wl_list_for_each(view, &server.views, link) {
+			if (view->fullscreen) view_set_fullscreen(view, false);
+		}
+		break;
+	}
 	case EMBED_WINDOW_ICON: {
 		struct icon_request *request = (struct icon_request *)msg.request;
 		scaled_icon_buffer_resolve(request->id, request->app_id, request->buffer);
@@ -653,6 +661,14 @@ anlabwc_window_request(uint64_t id, int action, char ***values, int *count)
 	} else desktop_request_release(request);
 	desktop_request_release(request);
 	return result;
+}
+
+ANLABWC_API int
+anlabwc_controls_visible(int visible)
+{
+	if (!visible) return 0;
+	struct embed_msg msg = {.type = EMBED_CONTROLS_VISIBLE};
+	return send_msg(&msg);
 }
 
 ANLABWC_API int
