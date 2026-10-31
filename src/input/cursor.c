@@ -795,6 +795,9 @@ cursor_get_resize_edges(struct wlr_cursor *cursor, const struct cursor_context *
 bool
 cursor_process_motion(uint32_t time, double *sx, double *sy)
 {
+#if HAVE_ANDROID_EMBED
+	anlabwc_embed_set_cursor_position(server.seat.cursor->x, server.seat.cursor->y);
+#endif
 	/* If the mode is non-passthrough, delegate to those functions. */
 	if (server.input_mode == LAB_INPUT_STATE_MOVE) {
 		process_cursor_move(time);
@@ -926,6 +929,9 @@ warp_cursor_to_constraint_hint(struct seat *seat,
 		wlr_cursor_warp(seat->cursor, NULL,
 			server.active_view->current.x + sx,
 			server.active_view->current.y + sy);
+#if HAVE_ANDROID_EMBED
+		anlabwc_embed_set_cursor_position(seat->cursor->x, seat->cursor->y);
+#endif
 
 		/* Make sure we are not sending unnecessary surface movements */
 		wlr_seat_pointer_warp(seat->wlr_seat, sx, sy);

@@ -480,6 +480,7 @@ void server_finish(void);
 #if HAVE_ANDROID_EMBED
 int anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data);
 void anlabwc_embed_set_cursor_shape(uint32_t shape);
+void anlabwc_embed_set_cursor_position(double x, double y);
 void anlabwc_embed_set_cursor_image(const uint32_t *pixels, int width,
 	int height, int hotspot_x, int hotspot_y);
 void anlabwc_embed_set_pointer_locked(bool locked);

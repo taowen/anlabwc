@@ -43,6 +43,8 @@ ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
 ANLABWC_API int anlabwc_relative_pointer(float dx, float dy, int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);
 ANLABWC_API int anlabwc_pointer_locked(void);
+/* Packed desktop pixel coordinates (x in high 32 bits), UINT64_MAX before motion. */
+ANLABWC_API uint64_t anlabwc_cursor_position(void);
 /*
  * Copies the current client-provided cursor image as Android ARGB pixels.
  * Returns the required pixel count, or zero when no custom image is active.

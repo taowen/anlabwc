@@ -239,6 +239,7 @@ static void window_request_release(struct window_request *request) {
 static char wayland_socket_path[512];
 static volatile bool running;
 static atomic_uint cursor_shape = 1;
+static atomic_uint_fast64_t cursor_position = UINT64_MAX;
 static atomic_bool pointer_locked;
 struct embed_cursor_image {
 	pthread_mutex_t lock;
@@ -290,6 +291,19 @@ ANLABWC_API int
 anlabwc_cursor_shape(void)
 {
 	return (int)atomic_load_explicit(&cursor_shape, memory_order_relaxed);
+}
+
+void
+anlabwc_embed_set_cursor_position(double x, double y)
+{
+	uint64_t position = ((uint64_t)(uint32_t)(int32_t)x << 32) | (uint32_t)(int32_t)y;
+	atomic_store_explicit(&cursor_position, position, memory_order_relaxed);
+}
+
+ANLABWC_API uint64_t
+anlabwc_cursor_position(void)
+{
+	return atomic_load_explicit(&cursor_position, memory_order_relaxed);
 }
 
 void
