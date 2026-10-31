@@ -201,7 +201,11 @@ end_touch_point(struct seat *seat, int32_t id, uint32_t time_msec, bool cancelle
 		}
 		if (point->surface) {
 			if (cancelled) {
-				wlr_seat_touch_notify_cancel(seat->wlr_seat, point->surface);
+				struct wlr_touch_point *seat_point =
+					wlr_seat_touch_get_point(seat->wlr_seat, id);
+				if (seat_point) {
+					wlr_seat_touch_notify_cancel(seat->wlr_seat, seat_point->client);
+				}
 			} else {
 				wlr_seat_touch_notify_up(seat->wlr_seat, time_msec, id);
 			}
