@@ -42,6 +42,7 @@ ANLABWC_API int anlabwc_set_window(struct ANativeWindow *window, int width, int 
 /* Showing host controls restores fullscreen views on the compositor event thread. */
 ANLABWC_API int anlabwc_controls_visible(int visible);
 ANLABWC_API int anlabwc_fullscreen(void);
+ANLABWC_API int anlabwc_toggle_fullscreen(void);
 /* Configure before run. Fullscreen transitions hide/restore the host controls. */
 ANLABWC_API void anlabwc_configure_controls(void (*visibility)(int));
 /* Configure before run. Zero keeps the client's saved floating size. */

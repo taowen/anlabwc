@@ -127,6 +127,7 @@ enum {
 	EMBED_DESKTOP_WINDOW,
 	EMBED_WINDOW_ICON,
 	EMBED_CONTROLS_VISIBLE,
+	EMBED_TOGGLE_FULLSCREEN,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -224,7 +225,7 @@ static void desktop_request_dispatch(struct desktop_request *request)
 		case 2: view_close(view); break;
 		case 3:
 			if (view->fullscreen) view_set_fullscreen(view, false);
-			else view_set_maximized(view, view->maximized ? VIEW_AXIS_NONE : VIEW_AXIS_BOTH);
+			else view_toggle_maximize(view, VIEW_AXIS_BOTH);
 			break;
 		}
 		request->result = 0;
@@ -583,6 +584,11 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	switch (msg.type) {
+	case EMBED_TOGGLE_FULLSCREEN:
+		if (server.active_view) {
+			view_set_fullscreen(server.active_view, !server.active_view->fullscreen);
+		}
+		break;
 	case EMBED_CONTROLS_VISIBLE: {
 		struct view *view;
 		wl_list_for_each(view, &server.views, link) {
@@ -716,6 +722,13 @@ anlabwc_controls_visible(int visible)
 {
 	if (!visible) return 0;
 	struct embed_msg msg = {.type = EMBED_CONTROLS_VISIBLE};
+	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_toggle_fullscreen(void)
+{
+	struct embed_msg msg = {.type = EMBED_TOGGLE_FULLSCREEN};
 	return send_msg(&msg);
 }
 
