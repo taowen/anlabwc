@@ -114,6 +114,7 @@ struct view_impl {
 	void (*close)(struct view *view);
 	void (*set_activated)(struct view *view, bool activated);
 	void (*set_fullscreen)(struct view *view, bool fullscreen);
+	void (*set_resizing)(struct view *view, bool resizing);
 	void (*notify_tiled)(struct view *view);
 	void (*maximize)(struct view *view, enum view_axis maximized);
 	void (*minimize)(struct view *view, bool minimize);

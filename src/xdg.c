@@ -696,6 +696,20 @@ xdg_toplevel_view_minimize(struct view *view, bool minimized)
 	/* noop */
 }
 
+static void
+xdg_toplevel_view_set_resizing(struct view *view, bool resizing)
+{
+	struct wlr_xdg_surface *surface = xdg_toplevel_view_from_view(view)->xdg_surface;
+	/* Cancellation also runs when an unmapped view is being destroyed. */
+	if (!surface || !surface->initialized) {
+		return;
+	}
+	uint32_t serial = wlr_xdg_toplevel_set_resizing(surface->toplevel, resizing);
+	if (serial > 0) {
+		set_pending_configure_serial(view, serial);
+	}
+}
+
 static struct wlr_xdg_toplevel *
 top_parent_of(struct view *view)
 {
@@ -916,6 +930,7 @@ static const struct view_impl xdg_toplevel_view_impl = {
 	.close = xdg_toplevel_view_close,
 	.set_activated = xdg_toplevel_view_set_activated,
 	.set_fullscreen = xdg_toplevel_view_set_fullscreen,
+	.set_resizing = xdg_toplevel_view_set_resizing,
 	.notify_tiled = xdg_toplevel_view_notify_tiled,
 	.maximize = xdg_toplevel_view_maximize,
 	.minimize = xdg_toplevel_view_minimize,

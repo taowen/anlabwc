@@ -155,6 +155,9 @@ interactive_begin(struct view *view, enum input_mode mode, enum lab_edge edges)
 		}
 		view_set_maximized(view, maximized);
 		view_set_untiled(view);
+		if (view->impl->set_resizing) {
+			view->impl->set_resizing(view, true);
+		}
 		cursor_shape = cursor_get_from_edge(server.resize_edges);
 		break;
 	}
@@ -357,6 +360,9 @@ interactive_cancel(struct view *view)
 	if (server.input_mode != LAB_INPUT_STATE_MOVE
 			&& server.input_mode != LAB_INPUT_STATE_RESIZE) {
 		return;
+	}
+	if (server.input_mode == LAB_INPUT_STATE_RESIZE && view->impl->set_resizing) {
+		view->impl->set_resizing(view, false);
 	}
 
 	overlay_finish(&server.seat);
