@@ -1717,6 +1717,10 @@ view_set_fullscreen(struct view *view, bool fullscreen)
 		anlabwc_embed_restore_geometry(view);
 #endif
 		view_apply_natural_geometry(view);
+		/* A client may have submitted its monitor-sized buffer before asking
+		 * for fullscreen. Its saved floating geometry must still fit the
+		 * work area when fullscreen is restored. */
+		view_constrain_size_to_that_of_usable_area(view);
 	} else {
 		view_apply_special_geometry(view);
 	}
