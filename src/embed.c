@@ -41,6 +41,7 @@
 #include "ssd.h"
 #include "theme.h"
 #include "view.h"
+#include "output.h"
 #include "buffer.h"
 #include "scaled-buffer/scaled-icon-buffer.h"
 
@@ -245,6 +246,29 @@ static atomic_uint_fast64_t cursor_position = UINT64_MAX;
 static atomic_bool pointer_locked;
 static atomic_bool fullscreen_active;
 static void (*controls_visibility)(int);
+static int restore_width, restore_height;
+
+ANLABWC_API void
+anlabwc_configure_restore_size(int width, int height)
+{
+	restore_width = width;
+	restore_height = height;
+}
+
+void
+anlabwc_embed_restore_geometry(struct view *view)
+{
+	if (restore_width <= 0 || restore_height <= 0 || !output_is_usable(view->output)) {
+		return;
+	}
+	struct wlr_box usable = output_usable_area_in_layout_coords(view->output);
+	struct wlr_box *geometry = &view->natural_geometry;
+	geometry->width = MIN(restore_width, usable.width);
+	geometry->height = MIN(restore_height, usable.height);
+	view_adjust_size(view, &geometry->width, &geometry->height);
+	view_compute_centered_position(view, &usable, geometry->width, geometry->height,
+		&geometry->x, &geometry->y);
+}
 
 ANLABWC_API void
 anlabwc_configure_controls(void (*visibility)(int))

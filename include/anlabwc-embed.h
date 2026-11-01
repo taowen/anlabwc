@@ -44,6 +44,8 @@ ANLABWC_API int anlabwc_controls_visible(int visible);
 ANLABWC_API int anlabwc_fullscreen(void);
 /* Configure before run. Fullscreen transitions hide/restore the host controls. */
 ANLABWC_API void anlabwc_configure_controls(void (*visibility)(int));
+/* Configure before run. Zero keeps the client's saved floating size. */
+ANLABWC_API void anlabwc_configure_restore_size(int width, int height);
 ANLABWC_API int anlabwc_pointer(float x, float y, int button, int pressed);
 ANLABWC_API int anlabwc_relative_pointer(float dx, float dy, int button, int pressed);
 ANLABWC_API int anlabwc_cursor_shape(void);

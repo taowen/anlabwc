@@ -485,6 +485,7 @@ void anlabwc_embed_set_cursor_image(const uint32_t *pixels, int width,
 	int height, int hotspot_x, int hotspot_y);
 void anlabwc_embed_set_pointer_locked(bool locked);
 void anlabwc_embed_set_fullscreen(bool fullscreen);
+void anlabwc_embed_restore_geometry(struct view *view);
 #endif
 
 void create_constraint(struct wl_listener *listener, void *data);

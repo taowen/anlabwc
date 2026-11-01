@@ -1713,6 +1713,9 @@ view_set_fullscreen(struct view *view, bool fullscreen)
 
 	set_fullscreen(view, fullscreen);
 	if (view_is_floating(view)) {
+#if HAVE_ANDROID_EMBED
+		anlabwc_embed_restore_geometry(view);
+#endif
 		view_apply_natural_geometry(view);
 	} else {
 		view_apply_special_geometry(view);
