@@ -128,6 +128,7 @@ enum {
 	EMBED_WINDOW_ICON,
 	EMBED_CONTROLS_VISIBLE,
 	EMBED_TOGGLE_FULLSCREEN,
+	EMBED_CONTROLS_GEOMETRY,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -247,6 +248,7 @@ static atomic_uint_fast64_t cursor_position = UINT64_MAX;
 static atomic_bool pointer_locked;
 static atomic_bool fullscreen_active;
 static void (*controls_visibility)(int);
+static atomic_int controls_right_padding;
 static int restore_width, restore_height;
 
 ANLABWC_API void
@@ -271,10 +273,10 @@ anlabwc_embed_restore_geometry(struct view *view)
 		&geometry->x, &geometry->y);
 }
 
-ANLABWC_API void
-anlabwc_configure_controls(void (*visibility)(int))
+int
+anlabwc_controls_right_padding(void)
 {
-	controls_visibility = visibility;
+	return atomic_load_explicit(&controls_right_padding, memory_order_relaxed);
 }
 
 void
@@ -584,6 +586,9 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		return 0;
 	}
 	switch (msg.type) {
+	case EMBED_CONTROLS_GEOMETRY:
+		output_update_all_usable_areas(false);
+		break;
 	case EMBED_TOGGLE_FULLSCREEN:
 		if (server.active_view) {
 			view_set_fullscreen(server.active_view, !server.active_view->fullscreen);
@@ -723,6 +728,18 @@ anlabwc_controls_visible(int visible)
 	if (!visible) return 0;
 	struct embed_msg msg = {.type = EMBED_CONTROLS_VISIBLE};
 	return send_msg(&msg);
+}
+
+ANLABWC_API void
+anlabwc_configure_controls(int right_padding, void (*visibility)(int))
+{
+	controls_visibility = visibility;
+	int previous = atomic_exchange_explicit(&controls_right_padding,
+		MAX(0, right_padding), memory_order_relaxed);
+	if (previous != MAX(0, right_padding) && running) {
+		struct embed_msg msg = {.type = EMBED_CONTROLS_GEOMETRY};
+		send_msg(&msg);
+	}
 }
 
 ANLABWC_API int
