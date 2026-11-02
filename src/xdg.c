@@ -121,7 +121,7 @@ set_fullscreen_from_request(struct view *view,
 			&& requested->fullscreen_output) {
 		view_set_output(view, output_from_wlr_output(requested->fullscreen_output));
 	}
-	view_set_fullscreen(view, requested->fullscreen);
+	view_request_fullscreen(view, requested->fullscreen);
 }
 
 /* Called from map/commit handler and updates view->pending.x/y directly */

@@ -372,7 +372,7 @@ handle_associate(struct wl_listener *listener, void *data)
 	 *   2. set decorations (depends on fullscreen state)
 	 *   3. set maximized (geometry depends on decorations)
 	 */
-	view_set_fullscreen(view, xsurface->fullscreen);
+	view_request_fullscreen(view, xsurface->fullscreen);
 	if (!view->been_mapped) {
 		if (want_deco(xsurface)) {
 			view_set_ssd_mode(view, LAB_SSD_MODE_FULL);
@@ -571,7 +571,7 @@ handle_request_fullscreen(struct wl_listener *listener, void *data)
 	if (!view->mapped) {
 		ensure_initial_geometry_and_output(view);
 	}
-	view_set_fullscreen(view, fullscreen);
+	view_request_fullscreen(view, fullscreen);
 }
 
 static void

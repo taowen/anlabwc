@@ -196,6 +196,9 @@ struct view {
 	bool was_minimized_by_show_desktop_action;
 	enum view_axis maximized;
 	bool fullscreen;
+#if HAVE_ANDROID_EMBED
+	bool fullscreen_restore_inhibited;
+#endif
 	bool tearing_hint;
 	enum lab_tristate force_tearing;
 	enum view_layer layer;
@@ -560,6 +563,7 @@ void view_set_maximized(struct view *view, enum view_axis maximized);
 void view_set_untiled(struct view *view);
 void view_maximize(struct view *view, enum view_axis axis);
 void view_set_fullscreen(struct view *view, bool fullscreen);
+void view_request_fullscreen(struct view *view, bool fullscreen);
 void view_toggle_maximize(struct view *view, enum view_axis axis);
 bool view_wants_decorations(struct view *view);
 void view_toggle_decorations(struct view *view);

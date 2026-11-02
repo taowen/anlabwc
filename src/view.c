@@ -1694,6 +1694,12 @@ void
 view_set_fullscreen(struct view *view, bool fullscreen)
 {
 	assert(view);
+#if HAVE_ANDROID_EMBED
+	/* A desktop restore is authoritative until the client leaves fullscreen
+	 * itself or the user explicitly enters it again through the desktop. */
+	if (fullscreen) view->fullscreen_restore_inhibited = false;
+	else if (view->fullscreen) view->fullscreen_restore_inhibited = true;
+#endif
 	if (fullscreen == view->fullscreen) {
 		return;
 	}
@@ -1731,6 +1737,21 @@ view_set_fullscreen(struct view *view, bool fullscreen)
 	 * isn't called. Update cursor focus explicitly for that case.
 	 */
 	cursor_update_focus();
+}
+
+void
+view_request_fullscreen(struct view *view, bool fullscreen)
+{
+#if HAVE_ANDROID_EMBED
+	if (fullscreen && view->fullscreen_restore_inhibited) {
+		if (view->impl->set_fullscreen) view->impl->set_fullscreen(view, false);
+		return;
+	}
+#endif
+	view_set_fullscreen(view, fullscreen);
+#if HAVE_ANDROID_EMBED
+	if (!fullscreen) view->fullscreen_restore_inhibited = false;
+#endif
 }
 
 void
