@@ -270,13 +270,22 @@ anlabwc_configure_restore_size(int width, int height)
 void
 anlabwc_embed_restore_geometry(struct view *view)
 {
-	if (restore_width <= 0 || restore_height <= 0 || !output_is_usable(view->output)) {
+	if (!output_is_usable(view->output)) {
 		return;
 	}
 	struct wlr_box usable = output_usable_area_in_layout_coords(view->output);
 	struct wlr_box *geometry = &view->natural_geometry;
-	geometry->width = MIN(restore_width, usable.width);
-	geometry->height = MIN(restore_height, usable.height);
+	int width = restore_width, height = restore_height;
+	if (width <= 0 || height <= 0) {
+		if (!wlr_box_empty(geometry)) return;
+		/* A client that starts fullscreen has no floating size to restore.
+		 * Sending 0x0 lets it retain a monitor-sized buffer, so choose a
+		 * centered floating size instead. Known user geometry stays intact. */
+		width = MAX(1, usable.width * 3 / 4);
+		height = MAX(1, usable.height * 3 / 4);
+	}
+	geometry->width = MIN(width, usable.width);
+	geometry->height = MIN(height, usable.height);
 	view_adjust_size(view, &geometry->width, &geometry->height);
 	view_compute_centered_position(view, &usable, geometry->width, geometry->height,
 		&geometry->x, &geometry->y);
