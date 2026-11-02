@@ -236,6 +236,7 @@ static void desktop_request_dispatch(struct desktop_request *request)
 			if (view->fullscreen) view_set_fullscreen(view, false);
 			else view_toggle_maximize(view, VIEW_AXIS_BOTH);
 			break;
+		case 4: view_set_fullscreen(view, !view->fullscreen); break;
 		}
 		request->result = 0;
 		return;
@@ -702,7 +703,7 @@ anlabwc_resolve_window_icon(uint64_t id, const char *app_id,
 int
 anlabwc_window_request(uint64_t id, int action, char ***values, int *count)
 {
-	if (action < 0 || action > 3 || !values || !count) return -EINVAL;
+	if (action < 0 || action > 4 || !values || !count) return -EINVAL;
 	*values = NULL; *count = 0;
 	struct desktop_request *request = calloc(1, sizeof(*request));
 	if (!request) return -ENOMEM;
