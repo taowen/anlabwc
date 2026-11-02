@@ -8,10 +8,6 @@
 
 #define _POSIX_C_SOURCE 200809L
 #include "output.h"
-#ifdef __ANDROID__
-#include "anlabwc-embed.h"
-#include <math.h>
-#endif
 #include <assert.h>
 #include <drm_fourcc.h>
 #include <glib.h>
@@ -1251,11 +1247,6 @@ update_usable_area(struct output *output)
 	}
 #endif
 
-#ifdef __ANDROID__
-	/* Host controls occupy output pixels, while the work area is logical. */
-	int reserved = (int)ceil(anlabwc_controls_right_padding() / output->wlr_output->scale);
-	output->usable_area.width = MAX(1, output->usable_area.width - reserved);
-#endif
 	return !wlr_box_equal(&old, &output->usable_area);
 }
 

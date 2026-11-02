@@ -28,8 +28,9 @@ ANLABWC_API void anlabwc_request_stop(void);
 ANLABWC_API void anlabwc_configure_input_focus(void (*callback)(int), int (*activation)(int));
 /* Called once after the embedded server is initialized and accepts clients. */
 ANLABWC_API void anlabwc_configure_ready(void (*callback)(void));
-/* Opt in before run; other embedders retain the standard decorations. */
-ANLABWC_API void anlabwc_configure_spatial_decorations(int enabled);
+/* Configure before run: NULL selects spatial controls; a directory supplies
+ * standard rc.xml and XDG theme resources. Returns -1 for an invalid path. */
+ANLABWC_API int anlabwc_configure_decorations(const char *config_dir);
 /* Optional asynchronous icon resolver. Called on the event thread; return promptly.
  * Supply premultiplied ARGB pixels from another thread. Client pixels take priority. */
 ANLABWC_API void anlabwc_configure_icon_resolver(void (*request)(uint64_t, const char *, const char *));

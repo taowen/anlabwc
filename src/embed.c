@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <math.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -90,10 +91,17 @@ static void window_policy_bind(struct wl_client *client, void *data,
 	wl_resource_set_implementation(resource, &window_policy_impl, NULL, NULL);
 }
 
-void
-anlabwc_configure_spatial_decorations(int enabled)
+static char decoration_config[PATH_MAX];
+
+int
+anlabwc_configure_decorations(const char *config_dir)
 {
-	ssd_set_spatial_style(enabled != 0);
+	if (config_dir && (config_dir[0] != '/' || strlen(config_dir) >= sizeof(decoration_config))) {
+		return -1;
+	}
+	snprintf(decoration_config, sizeof(decoration_config), "%s", config_dir ? config_dir : "");
+	ssd_set_spatial_style(!config_dir);
+	return 0;
 }
 
 static void (*ready_callback)(void);
@@ -945,6 +953,7 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	setenv("XDG_RUNTIME_DIR", runtime_dir, 1);
 	setenv("HOME", runtime_dir, 1);
 	setenv("XDG_CONFIG_HOME", runtime_dir, 1);
+	setenv("XDG_DATA_HOME", decoration_config[0] ? decoration_config : runtime_dir, 1);
 	setenv("XDG_SESSION_TYPE", "wayland", 1);
 	setenv("XDG_CURRENT_DESKTOP", "wlroots:labwc", 1);
 
@@ -1035,7 +1044,11 @@ anlabwc_run(struct ANativeWindow *window, int width, int height,
 	server.embed.input_wr = fds[1];
 	server.embed.android = NULL;
 
-	write_embed_rc(runtime_dir);
+	if (decoration_config[0]) {
+		rc.config_dir = decoration_config;
+	} else {
+		write_embed_rc(runtime_dir);
+	}
 	session_environment_init();
 	rcxml_read(rc.config_file);
 

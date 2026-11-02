@@ -7,6 +7,10 @@
  */
 
 #include "layers.h"
+#ifdef __ANDROID__
+#include "anlabwc-embed.h"
+#include <math.h>
+#endif
 #include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -74,7 +78,14 @@ layers_arrange(struct output *output)
 	struct wlr_box full_area = { 0 };
 	wlr_output_effective_resolution(output->wlr_output,
 		&full_area.width, &full_area.height);
-	struct wlr_box usable_area = full_area;
+	struct wlr_box panel_area = full_area;
+#ifdef __ANDROID__
+	/* Reserve host controls before placing panels and applying their zones.
+	 * Background clients still paint the entire physical output. */
+	int reserved = (int)ceil(anlabwc_controls_right_padding() / output->wlr_output->scale);
+	panel_area.width = MAX(1, panel_area.width - reserved);
+#endif
+	struct wlr_box usable_area = panel_area;
 
 	apply_override(output, &usable_area);
 
@@ -102,12 +113,18 @@ layers_arrange(struct output *output)
 		 * the layershell client wants to use the full screen rather
 		 * than the usable area.
 		 */
-		arrange_one_layer(&full_area, &usable_area, layer, /* exclusive */ true);
+		const struct wlr_box *bounds =
+			i == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND
+			? &full_area : &panel_area;
+		arrange_one_layer(bounds, &usable_area, layer, /* exclusive */ true);
 	}
 
 	for (size_t i = 0; i < ARRAY_SIZE(output->layer_tree); i++) {
 		struct wlr_scene_tree *layer = output->layer_tree[i];
-		arrange_one_layer(&full_area, &usable_area, layer, /* exclusive */ false);
+		const struct wlr_box *bounds =
+			i == ZWLR_LAYER_SHELL_V1_LAYER_BACKGROUND
+			? &full_area : &panel_area;
+		arrange_one_layer(bounds, &usable_area, layer, /* exclusive */ false);
 
 		/* Set node position to account for output layout change */
 		wlr_scene_node_set_position(&layer->node, scene_output->x,
