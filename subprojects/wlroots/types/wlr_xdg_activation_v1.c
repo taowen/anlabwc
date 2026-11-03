@@ -43,6 +43,11 @@ void wlr_xdg_activation_token_v1_destroy(
 	free(token);
 }
 
+struct wl_client *wlr_xdg_activation_token_v1_get_client(
+		struct wlr_xdg_activation_token_v1 *token) {
+	return token->resource ? wl_resource_get_client(token->resource) : NULL;
+}
+
 static int token_handle_timeout(void *data) {
 	struct wlr_xdg_activation_token_v1 *token = data;
 	wlr_log(WLR_DEBUG, "Activation token '%s' has expired", token->token);
@@ -103,7 +108,6 @@ static void token_handle_commit(struct wl_client *client,
 
 	// Make the token resource inert
 	wl_resource_set_user_data(token->resource, NULL);
-	token->resource = NULL;
 
 	if (token->seat != NULL) {
 		struct wlr_seat_client *seat_client =
@@ -129,7 +133,9 @@ static void token_handle_commit(struct wl_client *client,
 		return;
 	}
 
+	/* Keep the issuer available to policy listeners during this event. */
 	wl_signal_emit_mutable(&token->activation->events.new_token, token);
+	token->resource = NULL;
 
 	xdg_activation_token_v1_send_done(token_resource, token->token);
 

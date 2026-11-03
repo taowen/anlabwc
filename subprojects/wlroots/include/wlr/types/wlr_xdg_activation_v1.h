@@ -71,6 +71,11 @@ struct wlr_xdg_activation_v1 *wlr_xdg_activation_v1_create(
 struct wlr_xdg_activation_token_v1 *wlr_xdg_activation_token_v1_create(
 		struct wlr_xdg_activation_v1 *activation);
 
+// The issuing client while building a token or handling new_token. NULL after
+// commit, and for tokens created by the compositor rather than a client.
+struct wl_client *wlr_xdg_activation_token_v1_get_client(
+		struct wlr_xdg_activation_token_v1 *token);
+
 void wlr_xdg_activation_token_v1_destroy(
 		struct wlr_xdg_activation_token_v1 *token);
 

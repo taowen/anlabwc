@@ -957,18 +957,33 @@ handle_xdg_activation_token_destroy(struct wl_listener *listener, void *data)
 	free(token_data);
 }
 
+/* wlroots has already checked the serial against the issuing client. The
+ * source surface is optional (GTK panels may have no keyboard focus); require
+ * that the same serial belongs to a currently focused client instead. */
+static bool
+activation_source_has_input(struct wlr_xdg_activation_token_v1 *token,
+	struct wlr_surface *surface)
+{
+	struct wl_client *issuer = wlr_xdg_activation_token_v1_get_client(token);
+	if (!token->seat || !issuer || !surface
+		|| wl_resource_get_client(surface->resource) != issuer
+		|| (token->surface && token->surface != surface)) {
+		return false;
+	}
+	struct wlr_seat_client *client = wlr_seat_client_for_wl_client(token->seat,
+		wl_resource_get_client(surface->resource));
+	return client && wlr_seat_client_validate_event_serial(client, token->serial);
+}
+
 static void
 handle_xdg_activation_new_token(struct wl_listener *listener, void *data)
 {
 	struct wlr_xdg_activation_token_v1 *token = data;
 	struct token_data *token_data = znew(*token_data);
-	struct wlr_seat_client *source_client = token->seat && token->surface
-		? wlr_seat_client_for_wl_client(token->seat,
-			wl_resource_get_client(token->surface->resource)) : NULL;
-	token_data->user_initiated = source_client &&
-		(token->seat->keyboard_state.focused_surface == token->surface ||
-		 token->seat->pointer_state.focused_surface == token->surface) &&
-		wlr_seat_client_validate_event_serial(source_client, token->serial);
+	token_data->user_initiated = token->seat &&
+		(activation_source_has_input(token, token->seat->keyboard_state.focused_surface)
+		 || activation_source_has_input(token, token->seat->pointer_state.focused_surface));
+
 	token_data->had_valid_seat = !!token->seat;
 	token->data = token_data;
 
