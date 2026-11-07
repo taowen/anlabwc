@@ -713,8 +713,23 @@ view_constrain_host_orientation(struct view *view, struct wlr_box *geo)
 		width = (int64_t)width * geo->height / height;
 		height = geo->height;
 	}
-	geo->x += (geo->width - width) / 2;
-	geo->y += (geo->height - height) / 2;
+	if (server.input_mode == LAB_INPUT_STATE_RESIZE
+			&& server.grabbed_view == view) {
+		/* Orientation constraints change the negotiated size, not the
+		 * resize anchor. Centering every motion accumulates offsets from
+		 * the last committed position and makes the window walk away. */
+		geo->x = server.grab_box.x;
+		geo->y = server.grab_box.y;
+		if (server.resize_edges & LAB_EDGE_LEFT) {
+			geo->x += server.grab_box.width - width;
+		}
+		if (server.resize_edges & LAB_EDGE_TOP) {
+			geo->y += server.grab_box.height - height;
+		}
+	} else {
+		geo->x += (geo->width - width) / 2;
+		geo->y += (geo->height - height) / 2;
+	}
 	geo->width = MAX(1, width);
 	geo->height = MAX(1, height);
 }
