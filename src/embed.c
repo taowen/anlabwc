@@ -134,7 +134,7 @@ enum {
 	EMBED_PTR_RELATIVE,
 	EMBED_DESKTOP_WINDOW,
 	EMBED_WINDOW_ICON,
-	EMBED_CONTROLS_VISIBLE,
+	EMBED_RESTORE_WINDOWS,
 	EMBED_TOGGLE_FULLSCREEN,
 	EMBED_CONTROLS_GEOMETRY,
 	EMBED_WINDOW_ORIENTATION,
@@ -613,7 +613,7 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 			view_set_fullscreen(server.active_view, !server.active_view->fullscreen);
 		}
 		break;
-	case EMBED_CONTROLS_VISIBLE: {
+	case EMBED_RESTORE_WINDOWS: {
 		struct view *view;
 		wl_list_for_each(view, &server.views, link) {
 			if (view->fullscreen) view_set_fullscreen(view, false);
@@ -756,10 +756,9 @@ anlabwc_window_request(uint64_t id, int action, char ***values, int *count)
 }
 
 ANLABWC_API int
-anlabwc_controls_visible(int visible)
+anlabwc_restore_windows(void)
 {
-	if (!visible) return 0;
-	struct embed_msg msg = {.type = EMBED_CONTROLS_VISIBLE};
+	struct embed_msg msg = {.type = EMBED_RESTORE_WINDOWS};
 	return send_msg(&msg);
 }
 
@@ -960,6 +959,11 @@ write_embed_rc(const char *runtime_dir)
 		"    </context>\n"
 		"%s"
 		"  </mouse>\n"
+		"  <windowRules>\n"
+		"    <windowRule identifier=\"io.taowen.arlinux.input-method\">\n"
+		"      <action name=\"ToggleAlwaysOnTop\"/>\n"
+		"    </windowRule>\n"
+		"  </windowRules>\n"
 		"</labwc_config>\n",
 		ssd_spatial_style_enabled() ? 14 : 12,
 		ssd_spatial_style_enabled() ? 14 : 12,
