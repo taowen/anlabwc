@@ -42,6 +42,8 @@ void anlabwc_report_input_focus(int pid);
 ANLABWC_API int anlabwc_set_window(struct ANativeWindow *window, int width, int height);
 /* Showing host controls restores fullscreen views on the compositor event thread. */
 ANLABWC_API int anlabwc_controls_visible(int visible);
+/* Activity window axis: 0=desktop allocation, 1=landscape, 2=portrait. */
+ANLABWC_API int anlabwc_window_orientation(const char *app_id, int axis);
 ANLABWC_API int anlabwc_fullscreen(void);
 ANLABWC_API int anlabwc_toggle_fullscreen(void);
 /* Configure before run. Fullscreen transitions hide/restore the host controls. */

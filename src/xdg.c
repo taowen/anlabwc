@@ -610,6 +610,7 @@ static void
 xdg_toplevel_view_configure(struct view *view, struct wlr_box geo)
 {
 	uint32_t serial = 0;
+	view_constrain_host_orientation(view, &geo);
 
 	struct wlr_xdg_toplevel *toplevel = xdg_toplevel_from_view(view);
 

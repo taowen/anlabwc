@@ -137,6 +137,7 @@ enum {
 	EMBED_CONTROLS_VISIBLE,
 	EMBED_TOGGLE_FULLSCREEN,
 	EMBED_CONTROLS_GEOMETRY,
+	EMBED_WINDOW_ORIENTATION,
 };
 
 #define EVDEV_LEFTCTRL 29u
@@ -616,7 +617,21 @@ anlabwc_embed_input_dispatch(int fd, uint32_t mask, void *data)
 		struct view *view;
 		wl_list_for_each(view, &server.views, link) {
 			if (view->fullscreen) view_set_fullscreen(view, false);
+			if (view->maximized != VIEW_AXIS_NONE) view_maximize(view, VIEW_AXIS_NONE);
 		}
+		break;
+	}
+	case EMBED_WINDOW_ORIENTATION: {
+		char *app_id = (char *)msg.request;
+		struct view *view;
+		wl_list_for_each(view, &server.views, link) {
+			if (!view->app_id || strcmp(view->app_id, app_id)
+					|| view->host_orientation == msg.pressed) continue;
+			view->host_orientation = msg.pressed;
+			view_move_resize(view, view->host_orientation_box.width > 0
+				? view->host_orientation_box : view->pending);
+		}
+		free(app_id);
 		break;
 	}
 	case EMBED_WINDOW_ICON: {
@@ -746,6 +761,19 @@ anlabwc_controls_visible(int visible)
 	if (!visible) return 0;
 	struct embed_msg msg = {.type = EMBED_CONTROLS_VISIBLE};
 	return send_msg(&msg);
+}
+
+ANLABWC_API int
+anlabwc_window_orientation(const char *app_id, int axis)
+{
+	if (!app_id || axis < 0 || axis > 2) return -EINVAL;
+	char *copy = strdup(app_id);
+	if (!copy) return -ENOMEM;
+	struct embed_msg msg = {.type = EMBED_WINDOW_ORIENTATION,
+		.pressed = axis, .request = (uintptr_t)copy};
+	int result = send_msg(&msg);
+	if (result < 0) free(copy);
+	return result;
 }
 
 ANLABWC_API void
@@ -925,6 +953,11 @@ write_embed_rc(const char *runtime_dir)
 		"  </theme>\n"
 		"  <mouse>\n"
 		"    <default />\n"
+		"    <context name=\"Root\">\n"
+		"      <mousebind button=\"Left\" action=\"Press\"><action name=\"None\"/></mousebind>\n"
+		"      <mousebind button=\"Right\" action=\"Press\"><action name=\"None\"/></mousebind>\n"
+		"      <mousebind button=\"Middle\" action=\"Press\"><action name=\"None\"/></mousebind>\n"
+		"    </context>\n"
 		"%s"
 		"  </mouse>\n"
 		"</labwc_config>\n",

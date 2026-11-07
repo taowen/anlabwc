@@ -695,6 +695,31 @@ round_to_increment(int val, int base, int inc)
 }
 
 void
+view_constrain_host_orientation(struct view *view, struct wlr_box *geo)
+{
+	/* Retain the allocation so repeated Activity rotations cannot shrink it. */
+	view->host_orientation_box = *geo;
+	if (!view->host_orientation || geo->width <= 0 || geo->height <= 0
+			|| ((view->host_orientation == 2) == (geo->height > geo->width))) {
+		return;
+	}
+	int width = geo->height, height = geo->width;
+	/* Choose a window size within the allocated area, not a content transform. */
+	if (width > geo->width) {
+		height = (int64_t)height * geo->width / width;
+		width = geo->width;
+	}
+	if (height > geo->height) {
+		width = (int64_t)width * geo->height / height;
+		height = geo->height;
+	}
+	geo->x += (geo->width - width) / 2;
+	geo->y += (geo->height - height) / 2;
+	geo->width = MAX(1, width);
+	geo->height = MAX(1, height);
+}
+
+void
 view_adjust_size(struct view *view, int *w, int *h)
 {
 	assert(view);
@@ -1095,11 +1120,11 @@ view_place_by_policy(struct view *view, bool allow_cursor,
 	}
 }
 
-void
-view_constrain_size_to_that_of_usable_area(struct view *view)
+static bool
+constrain_geometry_to_usable_area(struct view *view, struct wlr_box *geometry)
 {
 	if (!view || !output_is_usable(view->output) || view->fullscreen) {
-		return;
+		return false;
 	}
 
 	struct wlr_box usable_area =
@@ -1110,27 +1135,22 @@ view_constrain_size_to_that_of_usable_area(struct view *view)
 	int available_height = usable_area.height - margin.top - margin.bottom;
 
 	if (available_width <= 0 || available_height <= 0) {
-		return;
+		return false;
 	}
 
-	if (available_height >= view->pending.height &&
-			available_width >= view->pending.width) {
-		return;
-	}
-
-	int width = MIN(view->pending.width, available_width);
-	int height = MIN(view->pending.height, available_height);
+	int width = MIN(geometry->width, available_width);
+	int height = MIN(geometry->height, available_height);
 
 	int right_edge = usable_area.x + usable_area.width;
 	int bottom_edge = usable_area.y + usable_area.height;
 
 	int x =
 		MAX(usable_area.x + margin.left,
-			MIN(view->pending.x, right_edge - width - margin.right));
+			MIN(geometry->x, right_edge - width - margin.right));
 
 	int y =
 		MAX(usable_area.y + margin.top,
-			MIN(view->pending.y, bottom_edge - height - margin.bottom));
+			MIN(geometry->y, bottom_edge - height - margin.bottom));
 
 	struct wlr_box box = {
 		.x = x,
@@ -1138,7 +1158,25 @@ view_constrain_size_to_that_of_usable_area(struct view *view)
 		.width = width,
 		.height = height,
 	};
-	view_move_resize(view, box);
+	if (wlr_box_equal(geometry, &box)) {
+		return false;
+	}
+	*geometry = box;
+	return true;
+}
+
+void
+view_constrain_size_to_that_of_usable_area(struct view *view)
+{
+	if (!view) {
+		return;
+	}
+	struct wlr_box geometry = view->pending;
+	if (constrain_geometry_to_usable_area(view, &geometry)
+			&& (geometry.width != view->pending.width
+				|| geometry.height != view->pending.height)) {
+		view_move_resize(view, geometry);
+	}
 }
 
 void
@@ -1822,6 +1860,14 @@ view_adjust_for_layout_change(struct view *view)
 		/* Ensure view is on-screen */
 		adjust_floating_geometry(view, &new_geo,
 			/* midpoint_visibility */ true);
+#if HAVE_ANDROID_EMBED
+		/* A phone output can swap its dimensions while apps remain open.
+		 * Keep the complete floating window reachable after the modeset. */
+		if (window_rules_get_property(view, "fixedPosition") != LAB_PROP_TRUE
+				&& !view_has_strut_partial(view)) {
+			constrain_geometry_to_usable_area(view, &new_geo);
+		}
+#endif
 		view_move_resize(view, new_geo);
 	}
 

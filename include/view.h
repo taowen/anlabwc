@@ -138,6 +138,9 @@ struct view_impl {
 struct view {
 	/* Embedded host capability; pointer interaction does not imply editor focus. */
 	bool inhibit_keyboard_focus;
+	/* Embedded Activity axis: 0=desktop, 1=landscape, 2=portrait. */
+	int host_orientation;
+	struct wlr_box host_orientation_box;
 	enum view_type type;
 	const struct view_impl *impl;
 	struct wl_list link;
@@ -498,6 +501,7 @@ void view_close(struct view *view);
  * For move only, use view_move()
  */
 void view_move_resize(struct view *view, struct wlr_box geo);
+void view_constrain_host_orientation(struct view *view, struct wlr_box *geo);
 void view_resize_relative(struct view *view,
 	int left, int right, int top, int bottom);
 void view_move_relative(struct view *view, int x, int y);
