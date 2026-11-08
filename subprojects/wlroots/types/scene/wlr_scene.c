@@ -1,6 +1,9 @@
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
+#include <drm_fourcc.h>
+#include <wlr/render/allocator.h>
+#include <wlr/render/drm_format_set.h>
 #include <wlr/backend.h>
 #include <wlr/render/swapchain.h>
 #include <wlr/render/drm_syncobj.h>
@@ -16,6 +19,7 @@
 #include <wlr/util/region.h>
 #include <wlr/util/transform.h>
 #include "render/color.h"
+#include "render/wlr_renderer.h"
 #include "types/wlr_output.h"
 #include "types/wlr_scene.h"
 #include "util/array.h"
@@ -2731,4 +2735,106 @@ void wlr_scene_output_for_each_buffer(struct wlr_scene_output *scene_output,
 		&box.width, &box.height);
 	scene_output_for_each_scene_buffer(&box, &scene_output->scene->tree.node, 0, 0,
 		iterator, user_data);
+}
+
+static bool snapshot_node(struct wlr_scene_node *node,
+		struct wlr_renderer *renderer, struct wlr_render_pass *pass, int x, int y) {
+	if (!node->enabled) {
+		return true;
+	}
+	x += node->x;
+	y += node->y;
+	if (node->type == WLR_SCENE_NODE_TREE) {
+		struct wlr_scene_node *child;
+		wl_list_for_each(child, &wlr_scene_tree_from_node(node)->children, link) {
+			if (!snapshot_node(child, renderer, pass, x, y)) {
+				return false;
+			}
+		}
+		return true;
+	}
+	struct wlr_box dst = { .x = x, .y = y };
+	scene_node_get_size(node, &dst.width, &dst.height);
+	if (node->type == WLR_SCENE_NODE_RECT) {
+		struct wlr_scene_rect *rect = wlr_scene_rect_from_node(node);
+		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options) {
+			.box = dst, .color = {rect->color[0], rect->color[1], rect->color[2], rect->color[3]},
+		});
+		return true;
+	}
+	struct wlr_scene_buffer *buffer = wlr_scene_buffer_from_node(node);
+	if (buffer->is_single_pixel_buffer) {
+		wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options) {
+			.box = dst, .color = {
+				.r = buffer->single_pixel_buffer_color[0] / (double)UINT32_MAX,
+				.g = buffer->single_pixel_buffer_color[1] / (double)UINT32_MAX,
+				.b = buffer->single_pixel_buffer_color[2] / (double)UINT32_MAX,
+				.a = buffer->single_pixel_buffer_color[3] / (double)UINT32_MAX * buffer->opacity,
+			},
+		});
+		return true;
+	}
+	struct wlr_texture *texture = scene_buffer_get_texture(buffer, renderer);
+	if (!texture) {
+		return buffer->buffer == NULL;
+	}
+	struct wlr_color_primaries primaries = {0};
+	if (buffer->primaries) {
+		wlr_color_primaries_from_named(&primaries, buffer->primaries);
+	}
+	struct wlr_color_luminances src_lum, srgb_lum;
+	wlr_color_transfer_function_get_default_luminance(buffer->transfer_function, &src_lum);
+	wlr_color_transfer_function_get_default_luminance(WLR_COLOR_TRANSFER_FUNCTION_SRGB, &srgb_lum);
+	float luminance = get_luminance_multiplier(&src_lum, &srgb_lum);
+	wlr_render_pass_add_texture(pass, &(struct wlr_render_texture_options) {
+		.texture = texture, .src_box = buffer->src_box, .dst_box = dst,
+		.transform = wlr_output_transform_invert(buffer->transform),
+		.alpha = &buffer->opacity, .filter_mode = buffer->filter_mode,
+		.transfer_function = buffer->transfer_function,
+		.primaries = buffer->primaries ? &primaries : NULL,
+		.color_encoding = buffer->color_encoding, .color_range = buffer->color_range,
+		.luminance_multiplier = &luminance,
+		.wait_timeline = buffer->wait_timeline, .wait_point = buffer->wait_point,
+	});
+	return true;
+}
+
+struct wlr_buffer *wlr_scene_tree_snapshot(struct wlr_scene_tree *tree,
+		struct wlr_renderer *renderer, struct wlr_allocator *allocator,
+		const struct wlr_box *box) {
+	if (wlr_box_empty(box)) {
+		return NULL;
+	}
+	const struct wlr_drm_format_set *formats = wlr_renderer_get_render_formats(renderer);
+	if (!formats) {
+		return NULL;
+	}
+	const struct wlr_drm_format *format = wlr_drm_format_set_get(formats, DRM_FORMAT_ARGB8888);
+	if (!format) {
+		format = wlr_drm_format_set_get(formats, DRM_FORMAT_ABGR8888);
+	}
+	if (!format) {
+		return NULL;
+	}
+	struct wlr_buffer *buffer = wlr_allocator_create_buffer(allocator, box->width, box->height, format);
+	if (!buffer) {
+		return NULL;
+	}
+	struct wlr_render_pass *pass = wlr_renderer_begin_buffer_pass(renderer, buffer, NULL);
+	if (!pass) {
+		wlr_buffer_drop(buffer);
+		return NULL;
+	}
+	wlr_render_pass_add_rect(pass, &(struct wlr_render_rect_options) {
+		.box = { .width = box->width, .height = box->height },
+		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
+	});
+	bool complete = snapshot_node(&tree->node, renderer, pass,
+		-box->x - tree->node.x, -box->y - tree->node.y);
+	bool submitted = wlr_render_pass_submit(pass);
+	if (!complete || !submitted) {
+		wlr_buffer_drop(buffer);
+		return NULL;
+	}
+	return buffer;
 }

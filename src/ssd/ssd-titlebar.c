@@ -32,7 +32,7 @@ ssd_titlebar_create(struct ssd *ssd)
 	}
 	struct view *view = ssd->view;
 	struct theme *theme = rc.theme;
-	int width = view->current.width;
+	int width = view_render_geometry(view).width;
 	int corner_width = ssd_get_corner_width();
 
 	ssd->titlebar.tree = lab_wlr_scene_tree_create(ssd->tree);
@@ -162,7 +162,7 @@ static void
 set_squared_corners(struct ssd *ssd, bool enable)
 {
 	struct view *view = ssd->view;
-	int width = view->current.width;
+	int width = view_render_geometry(view).width;
 	int corner_width = ssd_get_corner_width();
 	struct theme *theme = rc.theme;
 
@@ -225,7 +225,7 @@ update_visible_buttons(struct ssd *ssd)
 {
 	struct view *view = ssd->view;
 	struct theme *theme = rc.theme;
-	int width = MAX(view->current.width - 2 * theme->window_titlebar_padding_width, 0);
+	int width = MAX(view_render_geometry(view).width - 2 * theme->window_titlebar_padding_width, 0);
 	int button_width = theme->window_button_width;
 	int button_spacing = theme->window_button_spacing;
 	int button_count_left = rc.nr_title_buttons_left;
@@ -279,7 +279,7 @@ ssd_titlebar_update(struct ssd *ssd)
 		return;
 	}
 	struct view *view = ssd->view;
-	int width = view->current.width;
+	int width = view_render_geometry(view).width;
 	int corner_width = ssd_get_corner_width();
 	struct theme *theme = rc.theme;
 
@@ -374,7 +374,7 @@ ssd_update_title_positions(struct ssd *ssd, int offset_left, int offset_right)
 {
 	struct view *view = ssd->view;
 	struct theme *theme = rc.theme;
-	int width = view->current.width;
+	int width = view_render_geometry(view).width;
 	int title_bg_width = width - offset_left - offset_right;
 
 	enum ssd_active_state active;
@@ -461,7 +461,7 @@ ssd_update_title(struct ssd *ssd)
 
 	int offset_left, offset_right;
 	get_title_offsets(ssd, &offset_left, &offset_right);
-	int title_bg_width = view->current.width - offset_left - offset_right;
+	int title_bg_width = view_render_geometry(view).width - offset_left - offset_right;
 
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
@@ -528,6 +528,6 @@ ssd_should_be_squared(struct ssd *ssd)
 	int corner_width = ssd_get_corner_width();
 
 	return (view_is_tiled_and_notify_tiled(view)
-			|| view->current.width < corner_width * 2)
+			|| view_render_geometry(view).width < corner_width * 2)
 		&& view->maximized != VIEW_AXIS_BOTH;
 }

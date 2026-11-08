@@ -168,9 +168,11 @@ resize_indicator_update(struct view *view)
 	struct wlr_box view_box;
 	if (resize_outlines_enabled(view)) {
 		view_box = view->resize_outlines.view_geo;
+	} else if (view->resize_preview.buffer) {
+		view_box = view->resize_preview.geometry;
 	} else {
-		view_box = view->current;
-		view_box.height = view_effective_height(view, /* use_pending */ false);
+		view_box = view_render_geometry(view);
+		view_box.height = view_render_height(view);
 	}
 
 	if (server.input_mode == LAB_INPUT_STATE_RESIZE) {
@@ -197,8 +199,8 @@ resize_indicator_update(struct view *view)
 	resize_indicator_set_size(indicator, width);
 
 	/* Center the indicator in the window */
-	int x = view_box.x - view->current.x + (view_box.width - indicator->width) / 2;
-	int y = view_box.y - view->current.y + (view_box.height - indicator->height) / 2;
+	int x = view_box.x - view_render_geometry(view).x + (view_box.width - indicator->width) / 2;
+	int y = view_box.y - view_render_geometry(view).y + (view_box.height - indicator->height) / 2;
 	wlr_scene_node_set_position(&indicator->tree->node, x, y);
 
 	scaled_font_buffer_update(indicator->text, text, width, &rc.font_osd,

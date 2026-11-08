@@ -79,7 +79,7 @@ control_width(const struct ssd *ssd)
 {
 	int preferred = MAX(CONTROL_MIN_WIDTH,
 		MIN(CONTROL_MAX_WIDTH, ssd->spatial_frame.title_width + 2 * CONTROL_HEIGHT + 24));
-	return MAX(2 * CONTROL_HEIGHT, MIN(preferred, ssd->view->current.width));
+	return MAX(2 * CONTROL_HEIGHT, MIN(preferred, view_render_geometry(ssd->view).width));
 }
 
 bool
@@ -101,7 +101,7 @@ move_box(const struct ssd *ssd)
 {
 	int y = control_y(ssd) - MOVE_TOP_MARGIN;
 	return (struct wlr_box) {
-		.x = 0, .y = y, .width = ssd->view->current.width, .height = -y,
+		.x = 0, .y = y, .width = view_render_geometry(ssd->view).width, .height = -y,
 	};
 }
 
@@ -220,8 +220,8 @@ attach_close(struct ssd *ssd, struct ssd_titlebar_subtree *subtree)
 void
 ssd_spatial_border_update(struct ssd *ssd)
 {
-	int width = ssd->view->current.width;
-	int height = view_effective_height(ssd->view, false);
+	int width = view_render_geometry(ssd->view).width;
+	int height = view_render_height(ssd->view);
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
 		struct ssd_border_subtree *subtree = &ssd->border.subtrees[active];
@@ -297,7 +297,7 @@ static void
 update_controls(struct ssd *ssd)
 {
 	int width = control_width(ssd);
-	int x = (ssd->view->current.width - width) / 2;
+	int x = (view_render_geometry(ssd->view).width - width) / 2;
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
 		struct ssd_titlebar_subtree *subtree = &ssd->titlebar.subtrees[active];
@@ -337,12 +337,12 @@ ssd_spatial_update(struct ssd *ssd)
 	wlr_scene_node_set_position(&ssd->spatial_frame.move_area->node, band.x, band.y);
 	wlr_scene_buffer_set_dest_size(ssd->spatial_frame.move_glow,
 		move_glow_width(band.width), band.height);
-	int height = view_effective_height(ssd->view, false);
+	int height = view_render_height(ssd->view);
 	for (int i = 0; i < 4; ++i) {
 		bool right = i == 1 || i == 2;
 		bool bottom = i >= 2;
 		wlr_scene_node_set_position(&ssd->spatial_frame.corners[i]->node,
-			right ? ssd->view->current.width - HANDLE_SIZE + HANDLE_OUTSET : -HANDLE_OUTSET,
+			right ? view_render_geometry(ssd->view).width - HANDLE_SIZE + HANDLE_OUTSET : -HANDLE_OUTSET,
 			bottom ? height - HANDLE_SIZE + HANDLE_OUTSET : -HANDLE_OUTSET);
 	}
 	ssd->state.was_maximized = ssd->view->maximized == VIEW_AXIS_BOTH;
@@ -390,8 +390,8 @@ ssd_spatial_create(struct ssd *ssd)
 enum lab_node_type
 ssd_spatial_context(const struct ssd *ssd, struct wlr_cursor *cursor)
 {
-	struct wlr_box box = ssd->view->current;
-	box.height = view_effective_height(ssd->view, false);
+	struct wlr_box box = view_render_geometry(ssd->view);
+	box.height = view_render_height(ssd->view);
 	struct wlr_box controls = {
 		.x = box.x + (box.width - control_width(ssd)) / 2,
 		.y = box.y + control_y(ssd),
@@ -446,12 +446,12 @@ ssd_spatial_update_hover(struct view *view, enum lab_node_type type, struct wlr_
 	int glow_width = move_glow_width(band.width);
 	bool move_hover = view_titlebar_visible(view)
 		&& (type == LAB_NODE_TITLE || type == LAB_NODE_TITLEBAR)
-		&& wlr_box_contains_point(&band, cursor->x - view->current.x,
-			cursor->y - view->current.y);
+		&& wlr_box_contains_point(&band, cursor->x - view_render_geometry(view).x,
+			cursor->y - view_render_geometry(view).y);
 	wlr_scene_node_set_enabled(&ssd->spatial_frame.move_glow->node, move_hover);
 	if (move_hover) {
 		int x = MAX(0, MIN(band.width - glow_width,
-			(int)(cursor->x - view->current.x) - glow_width / 2));
+			(int)(cursor->x - view_render_geometry(view).x) - glow_width / 2));
 		wlr_scene_node_set_position(&ssd->spatial_frame.move_glow->node, x, band.y);
 	}
 	const enum lab_node_type types[] = {LAB_NODE_CORNER_TOP_LEFT,

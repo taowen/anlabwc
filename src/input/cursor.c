@@ -38,6 +38,7 @@
 #include "output.h"
 #include "resistance.h"
 #include "resize-outlines.h"
+#include "resize-preview.h"
 #include "ssd.h"
 #include "view.h"
 #include "xwayland.h"
@@ -500,7 +501,11 @@ process_cursor_resize(uint32_t time)
 	double dy = server.seat.cursor->y - server.grab_y;
 
 	struct view *view = server.grabbed_view;
+#if HAVE_ANDROID_EMBED
+	struct wlr_box new_view_geo = server.grab_box;
+#else
 	struct wlr_box new_view_geo = view->current;
+#endif
 
 	if (server.resize_edges & LAB_EDGE_TOP) {
 		/* Shift y to anchor bottom edge when resizing top */
@@ -533,11 +538,15 @@ process_cursor_resize(uint32_t time)
 			server.grab_box.width - new_view_geo.width;
 	}
 
+#if HAVE_ANDROID_EMBED
+	resize_preview_update(view, new_view_geo);
+#else
 	if (rc.resize_draw_contents) {
 		view_move_resize(view, new_view_geo);
 	} else {
 		resize_outlines_update(view, new_view_geo);
 	}
+#endif
 }
 
 void

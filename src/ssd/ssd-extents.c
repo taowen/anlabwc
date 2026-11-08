@@ -102,8 +102,8 @@ ssd_extents_update(struct ssd *ssd)
 
 	struct theme *theme = rc.theme;
 
-	int width = view->current.width;
-	int height = view_effective_height(view, /* use_pending */ false);
+	int width = view_render_geometry(view).width;
+	int height = view_render_height(view);
 	int titlebar_height = ssd->spatial ? 0 : ssd->titlebar.height;
 	int full_height = height + theme->border_width * 2 + titlebar_height;
 	int full_width = width + 2 * theme->border_width;

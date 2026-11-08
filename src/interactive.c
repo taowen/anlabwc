@@ -8,6 +8,7 @@
 #include "output.h"
 #include "regions.h"
 #include "resize-indicator.h"
+#include "resize-preview.h"
 #include "view.h"
 #include "window-rules.h"
 
@@ -103,6 +104,7 @@ interactive_begin(struct view *view, enum input_mode mode, enum lab_edge edges)
 
 	switch (mode) {
 	case LAB_INPUT_STATE_MOVE:
+		resize_preview_cancel(view);
 		if (view->fullscreen) {
 			/**
 			 * We don't allow moving fullscreen windows.
@@ -155,9 +157,15 @@ interactive_begin(struct view *view, enum input_mode mode, enum lab_edge edges)
 		}
 		view_set_maximized(view, maximized);
 		view_set_untiled(view);
+#if HAVE_ANDROID_EMBED
+		if (!resize_preview_begin(view)) {
+			return;
+		}
+#else
 		if (view->impl->set_resizing) {
 			view->impl->set_resizing(view, true);
 		}
+#endif
 		cursor_shape = cursor_get_from_edge(server.resize_edges);
 		break;
 	}
@@ -332,6 +340,8 @@ interactive_finish(struct view *view)
 		if (!snap_to_region(view)) {
 			snap_to_edge(view);
 		}
+	} else if (server.input_mode == LAB_INPUT_STATE_RESIZE) {
+		resize_preview_finish(view);
 	}
 
 	interactive_cancel(view);
@@ -350,6 +360,9 @@ interactive_cancel(struct view *view)
 	if (server.grabbed_view != view) {
 		return;
 	}
+	if (!view->resize_preview.submitted) {
+		resize_preview_cancel(view);
+	}
 
 	server.grabbed_view = NULL;
 
@@ -361,9 +374,11 @@ interactive_cancel(struct view *view)
 			&& server.input_mode != LAB_INPUT_STATE_RESIZE) {
 		return;
 	}
+#if !HAVE_ANDROID_EMBED
 	if (server.input_mode == LAB_INPUT_STATE_RESIZE && view->impl->set_resizing) {
 		view->impl->set_resizing(view, false);
 	}
+#endif
 
 	overlay_finish(&server.seat);
 

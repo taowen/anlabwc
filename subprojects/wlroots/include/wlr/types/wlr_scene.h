@@ -431,6 +431,16 @@ struct wlr_scene_buffer *wlr_scene_buffer_from_node(struct wlr_scene_node *node)
 struct wlr_scene_tree *wlr_scene_tree_from_node(struct wlr_scene_node *node);
 
 /**
+ * Render an enabled subtree once into an owned, alpha-capable GPU buffer.
+ * The box is relative to the tree; no frame callbacks or client configurations
+ * are sent. The caller must drop the returned buffer. NULL indicates failure.
+ */
+struct wlr_allocator;
+struct wlr_buffer *wlr_scene_tree_snapshot(struct wlr_scene_tree *tree,
+	struct wlr_renderer *renderer, struct wlr_allocator *allocator,
+	const struct wlr_box *box);
+
+/**
  * If this node represents a wlr_scene_rect, that rect will be returned. It
  * is not legal to feed a node that does not represent a wlr_scene_rect.
  */

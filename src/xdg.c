@@ -195,7 +195,7 @@ center_fullscreen_if_needed(struct view *view)
 	if (!xdg_view->fullscreen_bg) {
 		const float black[4] = {0, 0, 0, 1};
 		xdg_view->fullscreen_bg =
-			lab_wlr_scene_rect_create(view->scene_tree, 0, 0, black);
+			lab_wlr_scene_rect_create(view->render_tree, 0, 0, black);
 		wlr_scene_node_lower_to_bottom(&xdg_view->fullscreen_bg->node);
 	}
 
@@ -1068,10 +1068,11 @@ handle_new_xdg_toplevel(struct wl_listener *listener, void *data)
 	view->workspace = server.workspaces.current;
 	view->scene_tree = lab_wlr_scene_tree_create(
 		view->workspace->view_trees[VIEW_LAYER_NORMAL]);
+	view->render_tree = lab_wlr_scene_tree_create(view->scene_tree);
 	wlr_scene_node_set_enabled(&view->scene_tree->node, false);
 
 	struct wlr_scene_tree *tree = wlr_scene_xdg_surface_create(
-		view->scene_tree, xdg_surface);
+		view->render_tree, xdg_surface);
 	die_if_null(tree);
 
 	view->content_tree = tree;

@@ -177,6 +177,8 @@ struct view {
 	struct workspace *workspace;
 	struct wlr_surface *surface;
 	struct wlr_scene_tree *scene_tree;
+	/* Window pixels, separate from stacking/visibility and resize previews. */
+	struct wlr_scene_tree *render_tree;
 	struct wlr_scene_tree *content_tree; /* may be NULL for unmapped view */
 
 	/* These are never NULL and an empty string is set instead. */
@@ -267,6 +269,11 @@ struct view {
 		struct wlr_box view_geo;
 		struct lab_scene_rect *rect;
 	} resize_outlines;
+	struct {
+		struct wlr_scene_buffer *buffer;
+		struct wlr_box geometry;
+		bool submitted;
+	} resize_preview;
 
 	struct mappable mappable;
 
@@ -635,6 +642,8 @@ void view_set_icon(struct view *view, const char *icon_name,
 	struct wl_array *buffers);
 
 struct view_size_hints view_get_size_hints(struct view *view);
+struct wlr_box view_render_geometry(const struct view *view);
+int view_render_height(const struct view *view);
 void view_adjust_size(struct view *view, int *w, int *h);
 
 void view_evacuate_region(struct view *view);

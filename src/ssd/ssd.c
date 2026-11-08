@@ -68,12 +68,12 @@ ssd_max_extents(struct view *view)
 	assert(view);
 	struct border border = ssd_thickness(view);
 
-	int eff_width = view->current.width;
-	int eff_height = view_effective_height(view, /* use_pending */ false);
+	int eff_width = view_render_geometry(view).width;
+	int eff_height = view_render_height(view);
 
 	return (struct wlr_box){
-		.x = view->current.x - border.left,
-		.y = view->current.y - border.top,
+		.x = view_render_geometry(view).x - border.left,
+		.y = view_render_geometry(view).y - border.top,
 		.width = eff_width + border.left + border.right,
 		.height = eff_height + border.top + border.bottom,
 	};
@@ -99,8 +99,8 @@ ssd_get_resizing_type(const struct ssd *ssd, struct wlr_cursor *cursor)
 		return ssd_spatial_context(ssd, cursor);
 	}
 
-	struct wlr_box view_box = view->current;
-	view_box.height = view_effective_height(view, /* use_pending */ false);
+	struct wlr_box view_box = view_render_geometry(view);
+	view_box.height = view_render_height(view);
 
 	if (view_titlebar_visible(view)) {
 		/* If the titlebar is visible, consider it part of the view */
@@ -150,7 +150,7 @@ ssd_create(struct view *view, bool active)
 
 	ssd->view = view;
 	ssd->spatial = ssd_spatial_style_enabled();
-	ssd->tree = lab_wlr_scene_tree_create(view->scene_tree);
+	ssd->tree = lab_wlr_scene_tree_create(view->render_tree);
 
 	/*
 	 * Attach node_descriptor to the root node so that get_cursor_context()
@@ -178,7 +178,7 @@ ssd_create(struct view *view, bool active)
 	ssd->margin = ssd_thickness(view);
 	ssd_set_active(ssd, active);
 	ssd_enable_keybind_inhibit_indicator(ssd, view->inhibits_keybinds);
-	ssd->state.geometry = view->current;
+	ssd->state.geometry = view_render_geometry(view);
 
 	return ssd;
 }
@@ -216,10 +216,10 @@ ssd_update_geometry(struct ssd *ssd)
 	assert(view);
 
 	struct wlr_box cached = ssd->state.geometry;
-	struct wlr_box current = view->current;
+	struct wlr_box current = view_render_geometry(view);
 
 	int eff_width = current.width;
-	int eff_height = view_effective_height(view, /* use_pending */ false);
+	int eff_height = view_render_height(view);
 
 	bool update_area = eff_width != cached.width || eff_height != cached.height;
 	bool update_extents = update_area

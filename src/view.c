@@ -25,6 +25,7 @@
 #include "placement.h"
 #include "regions.h"
 #include "resize-indicator.h"
+#include "resize-preview.h"
 #include "session-lock.h"
 #include "snap-constraints.h"
 #include "snap.h"
@@ -548,12 +549,25 @@ view_move(struct view *view, int x, int y)
 	});
 }
 
+struct wlr_box
+view_render_geometry(const struct view *view)
+{
+	return view->resize_preview.buffer ? view->resize_preview.geometry : view->current;
+}
+
+int
+view_render_height(const struct view *view)
+{
+	return view->shaded ? 0 : view_render_geometry(view).height;
+}
+
 void
 view_moved(struct view *view)
 {
 	assert(view);
+	struct wlr_box render = view_render_geometry(view);
 	wlr_scene_node_set_position(&view->scene_tree->node,
-		view->current.x, view->current.y);
+		render.x, render.y);
 	/*
 	 * Only floating views change output when moved. Non-floating
 	 * views (maximized/tiled/fullscreen) are tied to a particular
@@ -564,6 +578,7 @@ view_moved(struct view *view)
 	}
 	view_update_outputs(view);
 	ssd_update_geometry(view->ssd);
+	resize_preview_committed(view);
 	cursor_update_focus();
 	if (rc.resize_indicator && server.grabbed_view == view) {
 		resize_indicator_update(view);
@@ -713,23 +728,8 @@ view_constrain_host_orientation(struct view *view, struct wlr_box *geo)
 		width = (int64_t)width * geo->height / height;
 		height = geo->height;
 	}
-	if (server.input_mode == LAB_INPUT_STATE_RESIZE
-			&& server.grabbed_view == view) {
-		/* Orientation constraints change the negotiated size, not the
-		 * resize anchor. Centering every motion accumulates offsets from
-		 * the last committed position and makes the window walk away. */
-		geo->x = server.grab_box.x;
-		geo->y = server.grab_box.y;
-		if (server.resize_edges & LAB_EDGE_LEFT) {
-			geo->x += server.grab_box.width - width;
-		}
-		if (server.resize_edges & LAB_EDGE_TOP) {
-			geo->y += server.grab_box.height - height;
-		}
-	} else {
-		geo->x += (geo->width - width) / 2;
-		geo->y += (geo->height - height) / 2;
-	}
+	geo->x += (geo->width - width) / 2;
+	geo->y += (geo->height - height) / 2;
 	geo->width = MAX(1, width);
 	geo->height = MAX(1, height);
 }
@@ -2465,6 +2465,10 @@ void
 view_update_visibility(struct view *view)
 {
 	bool visible = view->mapped && !view->minimized;
+	if (!visible) {
+		interactive_cancel(view);
+		resize_preview_cancel(view);
+	}
 	if (visible == view->scene_tree->node.enabled) {
 		return;
 	}
@@ -2582,6 +2586,7 @@ void
 view_destroy(struct view *view)
 {
 	assert(view);
+	resize_preview_cancel(view);
 
 	wl_signal_emit_mutable(&view->events.destroy, NULL);
 	snap_constraints_invalidate(view);
