@@ -55,6 +55,11 @@
 #endif
 
 static uint32_t output_formats_8bit[] = {
+#if HAVE_ANDROID_EMBED
+	/* Embedded outputs preserve window alpha for host-side backgrounds. */
+	DRM_FORMAT_ARGB8888,
+	DRM_FORMAT_ABGR8888,
+#endif
 	/* 32 bpp RGB with 8 bit component width */
 	DRM_FORMAT_XRGB8888,
 	DRM_FORMAT_XBGR8888,

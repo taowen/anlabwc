@@ -607,6 +607,8 @@ void wlr_scene_output_set_position(struct wlr_scene_output *scene_output,
 
 struct wlr_scene_output_state_options {
 	struct wlr_scene_timer *timer;
+	/** Preserve transparent regions for an embedding compositor. */
+	bool transparent_background;
 
 	/**
 	 * Color transform to apply before the output's color transform. Cannot be

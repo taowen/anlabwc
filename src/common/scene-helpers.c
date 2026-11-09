@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include "common/scene-helpers.h"
+#include "config.h"
 #include <assert.h>
 #include <wlr/types/wlr_output.h>
 #include <wlr/types/wlr_scene.h>
@@ -115,7 +116,12 @@ lab_wlr_scene_output_commit(struct wlr_scene_output *scene_output,
 		return true;
 	}
 
-	if (!wlr_scene_output_build_state(scene_output, state, NULL)) {
+	struct wlr_scene_output_state_options options = {0};
+#if HAVE_ANDROID_EMBED
+	/* The Android host supplies the background beneath embedded windows. */
+	options.transparent_background = true;
+#endif
+	if (!wlr_scene_output_build_state(scene_output, state, &options)) {
 		wlr_log(WLR_ERROR, "Failed to build output state for %s",
 			wlr_output->name);
 		return false;

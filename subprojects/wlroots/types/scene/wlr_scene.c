@@ -2581,7 +2581,9 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
 
 	wlr_render_pass_add_rect(render_pass, &(struct wlr_render_rect_options){
 		.box = { .width = buffer->width, .height = buffer->height },
-		.color = { .r = 0, .g = 0, .b = 0, .a = 1 },
+		.color = { .r = 0, .g = 0, .b = 0,
+			.a = options && options->transparent_background ? 0 : 1 },
+		.blend_mode = WLR_RENDER_BLEND_MODE_NONE,
 		.clip = &background,
 	});
 	pixman_region32_fini(&background);
