@@ -9,6 +9,7 @@
 #include "regions.h"
 #include "resize-indicator.h"
 #include "resize-preview.h"
+#include "ssd.h"
 #include "view.h"
 #include "window-rules.h"
 
@@ -123,6 +124,7 @@ interactive_begin(struct view *view, enum input_mode mode, enum lab_edge edges)
 		seat->region_prevent_snap = keyboard_get_all_modifiers(seat);
 
 		cursor_shape = LAB_CURSOR_GRAB;
+		ssd_spatial_update_hover(NULL, LAB_NODE_NONE, seat->cursor);
 		break;
 	case LAB_INPUT_STATE_RESIZE: {
 		if (view->shaded || view->fullscreen) {
@@ -158,7 +160,10 @@ interactive_begin(struct view *view, enum input_mode mode, enum lab_edge edges)
 		view_set_maximized(view, maximized);
 		view_set_untiled(view);
 #if HAVE_ANDROID_EMBED
+		/* Hover feedback must not be baked into the resize snapshot. */
+		ssd_spatial_update_hover(NULL, LAB_NODE_NONE, seat->cursor);
 		if (!resize_preview_begin(view)) {
+			cursor_update_focus();
 			return;
 		}
 #else
