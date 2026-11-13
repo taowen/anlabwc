@@ -61,7 +61,7 @@ struct ssd {
 		bool title_dirty;
 		struct wlr_scene_tree *feedback;
 		struct wlr_scene_rect *move_area;
-		struct wlr_scene_buffer *move_glow;
+		struct wlr_scene_buffer *frame_glow[4];
 		struct wlr_scene_buffer *corners[4];
 	} spatial_frame;
 
@@ -125,7 +125,6 @@ struct ssd {
 		struct ssd_border_subtree {
 			struct wlr_scene_tree *tree;
 			struct wlr_scene_rect *top, *bottom, *left, *right;
-			struct wlr_scene_rect *outline[4]; /* spatial client-edge separator */
 		} subtrees[2]; /* indexed by enum ssd_active_state */
 	} border;
 

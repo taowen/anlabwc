@@ -16,7 +16,7 @@
 #include "ssd.h"
 #include "ssd-internal.h"
 
-/* Heading hit targets and feedback share compositor logical coordinates,
+/* Frame hit targets and feedback share compositor logical coordinates,
  * independent of the touchpad or Android display density. */
 #define CONTROL_HEIGHT 44
 #define CONTROL_GAP 24
@@ -25,7 +25,7 @@
 #define FRAME_PADDING 24
 #define HANDLE_SIZE 88
 #define HANDLE_OUTSET 44
-#define MOVE_GLOW_WIDTH 640
+#define FRAME_GLOW_SIZE 640
 #define MOVE_TOP_MARGIN 12
 
 static const double pi = 3.141592653589793;
@@ -103,12 +103,6 @@ move_box(const struct ssd *ssd)
 	return (struct wlr_box) {
 		.x = 0, .y = y, .width = view_render_geometry(ssd->view).width, .height = -y,
 	};
-}
-
-static int
-move_glow_width(int width)
-{
-	return MIN(MAX(1, width / 2), MOVE_GLOW_WIDTH);
 }
 
 static bool
@@ -234,37 +228,19 @@ ssd_spatial_border_update(struct ssd *ssd)
 		wlr_scene_node_set_position(&subtree->left->node, 0, 0);
 		wlr_scene_rect_set_size(subtree->right, FRAME_PADDING, height);
 		wlr_scene_node_set_position(&subtree->right->node, width + FRAME_PADDING, 0);
-
-		/* One opaque logical pixel outside the client separates dark content
-		 * from a dark desktop. It stays inside the invisible resize surround. */
-		const struct wlr_box lines[] = {
-			{FRAME_PADDING - 1, -1, width + 2, 1},
-			{FRAME_PADDING - 1, height, width + 2, 1},
-			{FRAME_PADDING - 1, 0, 1, height},
-			{FRAME_PADDING + width, 0, 1, height},
-		};
-		float color[] = {active ? 0.30f : 0.19f,
-			active ? 0.34f : 0.22f, active ? 0.40f : 0.26f, 1.0f};
-		for (int i = 0; i < 4; ++i) {
-			if (!subtree->outline[i]) {
-				subtree->outline[i] = lab_wlr_scene_rect_create(subtree->tree, 0, 0, color);
-			}
-			wlr_scene_rect_set_size(subtree->outline[i], lines[i].width, lines[i].height);
-			wlr_scene_node_set_position(&subtree->outline[i]->node, lines[i].x, lines[i].y);
-		}
 	}
 }
 
-static struct wlr_scene_buffer *
-move_glow_create(struct wlr_scene_tree *parent)
+static void
+frame_glow_create(struct ssd *ssd)
 {
-	int height = MOVE_TOP_MARGIN + CONTROL_HEIGHT + CONTROL_GAP + FRAME_PADDING;
-	struct lab_data_buffer *buffer = buffer_create_cairo(MOVE_GLOW_WIDTH, height, 1);
+	struct lab_data_buffer *buffer = buffer_create_cairo(FRAME_GLOW_SIZE, FRAME_GLOW_SIZE, 1);
 	die_if_null(buffer);
 	cairo_t *cr = cairo_create(buffer->surface);
-	/* A cached elliptical highlight, positioned on hover without repainting. */
-	cairo_scale(cr, MOVE_GLOW_WIDTH / 2.0, height);
-	cairo_pattern_t *glow = cairo_pattern_create_radial(1, 0.4, 0, 1, 0.4, 1);
+	/* One cached spotlight, cropped into disjoint frame strips on hover.
+	 * Client pixels and input stay untouched; pointer motion never repaints it. */
+	cairo_scale(cr, FRAME_GLOW_SIZE / 2.0, FRAME_GLOW_SIZE / 2.0);
+	cairo_pattern_t *glow = cairo_pattern_create_radial(1, 1, 0, 1, 1, 1);
 	cairo_pattern_add_color_stop_rgba(glow, 0, 1, 1, 1, 0.62);
 	cairo_pattern_add_color_stop_rgba(glow, 0.45, 0.95, 0.97, 1, 0.28);
 	cairo_pattern_add_color_stop_rgba(glow, 1, 1, 1, 1, 0);
@@ -273,11 +249,13 @@ move_glow_create(struct wlr_scene_tree *parent)
 	cairo_pattern_destroy(glow);
 	cairo_surface_flush(buffer->surface);
 	cairo_destroy(cr);
-	struct wlr_scene_buffer *scene = lab_wlr_scene_buffer_create(parent, &buffer->base);
+	for (int i = 0; i < 4; ++i) {
+		struct wlr_scene_buffer *scene = lab_wlr_scene_buffer_create(ssd->titlebar.tree, &buffer->base);
+		scene->point_accepts_input = never_accepts_input;
+		wlr_scene_node_set_enabled(&scene->node, false);
+		ssd->spatial_frame.frame_glow[i] = scene;
+	}
 	wlr_buffer_drop(&buffer->base);
-	scene->point_accepts_input = never_accepts_input;
-	wlr_scene_node_set_enabled(&scene->node, false);
-	return scene;
 }
 
 void
@@ -335,8 +313,6 @@ ssd_spatial_update(struct ssd *ssd)
 	struct wlr_box band = move_box(ssd);
 	wlr_scene_rect_set_size(ssd->spatial_frame.move_area, band.width, band.height);
 	wlr_scene_node_set_position(&ssd->spatial_frame.move_area->node, band.x, band.y);
-	wlr_scene_buffer_set_dest_size(ssd->spatial_frame.move_glow,
-		move_glow_width(band.width), band.height);
 	int height = view_render_height(ssd->view);
 	for (int i = 0; i < 4; ++i) {
 		bool right = i == 1 || i == 2;
@@ -361,7 +337,7 @@ ssd_spatial_create(struct ssd *ssd)
 	ssd->spatial_frame.move_area = lab_wlr_scene_rect_create(ssd->titlebar.tree, 0, 0, invisible);
 	node_descriptor_create(&ssd->spatial_frame.move_area->node,
 		LAB_NODE_TITLE, ssd->view, NULL);
-	ssd->spatial_frame.move_glow = move_glow_create(ssd->titlebar.tree);
+	frame_glow_create(ssd);
 	enum ssd_active_state active;
 	FOR_EACH_ACTIVE_STATE(active) {
 		struct ssd_titlebar_subtree *subtree = &ssd->titlebar.subtrees[active];
@@ -433,8 +409,8 @@ ssd_spatial_update_hover(struct view *view, enum lab_node_type type, struct wlr_
 {
 	struct ssd *ssd = view ? view->ssd : NULL;
 	if (hovered_ssd && hovered_ssd != ssd) {
-		wlr_scene_node_set_enabled(&hovered_ssd->spatial_frame.move_glow->node, false);
 		for (int i = 0; i < 4; ++i) {
+			wlr_scene_node_set_enabled(&hovered_ssd->spatial_frame.frame_glow[i]->node, false);
 			wlr_scene_node_set_enabled(&hovered_ssd->spatial_frame.corners[i]->node, false);
 		}
 	}
@@ -443,16 +419,36 @@ ssd_spatial_update_hover(struct view *view, enum lab_node_type type, struct wlr_
 		return;
 	}
 	struct wlr_box band = move_box(ssd);
-	int glow_width = move_glow_width(band.width);
-	bool move_hover = view_titlebar_visible(view)
-		&& (type == LAB_NODE_TITLE || type == LAB_NODE_TITLEBAR)
-		&& wlr_box_contains_point(&band, cursor->x - view_render_geometry(view).x,
-			cursor->y - view_render_geometry(view).y);
-	wlr_scene_node_set_enabled(&ssd->spatial_frame.move_glow->node, move_hover);
-	if (move_hover) {
-		int x = MAX(0, MIN(band.width - glow_width,
-			(int)(cursor->x - view_render_geometry(view).x) - glow_width / 2));
-		wlr_scene_node_set_position(&ssd->spatial_frame.move_glow->node, x, band.y);
+	struct wlr_box box = view_render_geometry(view);
+	int height = view_render_height(view);
+	const struct wlr_box strips[] = {
+		{-FRAME_PADDING, band.y, box.width + 2 * FRAME_PADDING, -band.y},
+		{-FRAME_PADDING, height, box.width + 2 * FRAME_PADDING, FRAME_PADDING},
+		{-FRAME_PADDING, 0, FRAME_PADDING, height},
+		{box.width, 0, FRAME_PADDING, height},
+	};
+	struct wlr_box spot = {
+		.x = (int)(cursor->x - box.x) - FRAME_GLOW_SIZE / 2,
+		.y = (int)(cursor->y - box.y) - FRAME_GLOW_SIZE / 2,
+		.width = FRAME_GLOW_SIZE, .height = FRAME_GLOW_SIZE,
+	};
+	bool frame_hover = view_titlebar_visible(view)
+		&& (type == LAB_NODE_TITLE || type == LAB_NODE_TITLEBAR
+			|| type == LAB_NODE_CORNER_TOP_LEFT || type == LAB_NODE_CORNER_TOP_RIGHT
+			|| type == LAB_NODE_CORNER_BOTTOM_LEFT || type == LAB_NODE_CORNER_BOTTOM_RIGHT);
+	for (int i = 0; i < 4; ++i) {
+		struct wlr_scene_buffer *glow = ssd->spatial_frame.frame_glow[i];
+		struct wlr_box visible;
+		bool show = frame_hover && wlr_box_intersection(&visible, &strips[i], &spot);
+		wlr_scene_node_set_enabled(&glow->node, show);
+		if (!show) {
+			continue;
+		}
+		struct wlr_fbox source = {visible.x - spot.x, visible.y - spot.y,
+			visible.width, visible.height};
+		wlr_scene_buffer_set_source_box(glow, &source);
+		wlr_scene_buffer_set_dest_size(glow, visible.width, visible.height);
+		wlr_scene_node_set_position(&glow->node, visible.x, visible.y);
 	}
 	const enum lab_node_type types[] = {LAB_NODE_CORNER_TOP_LEFT,
 		LAB_NODE_CORNER_TOP_RIGHT, LAB_NODE_CORNER_BOTTOM_RIGHT, LAB_NODE_CORNER_BOTTOM_LEFT};
