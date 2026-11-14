@@ -7,6 +7,7 @@
 #include <wlr/util/log.h>
 #include "backend/android.h"
 #include "types/wlr_output.h"
+#include "util/time.h"
 
 static const uint32_t SUPPORTED_OUTPUT_STATE =
 	WLR_OUTPUT_STATE_BACKEND_OPTIONAL |
@@ -96,8 +97,12 @@ static bool output_commit(struct wlr_output *wlr_output,
 		};
 		output_defer_present(wlr_output, present_event);
 		if (backend->frame_timer && backend->window) {
+			/* Rendering is synchronous on this backend. Count it as part of
+			 * the frame period, instead of sleeping a full period afterwards. */
+			int64_t delay = backend->frame_start + backend->frame_delay
+				- get_current_time_msec();
 			wl_event_source_timer_update(backend->frame_timer,
-				backend->frame_delay);
+				delay > 0 ? delay : 1);
 		}
 	}
 
@@ -122,7 +127,10 @@ static const struct wlr_output_impl output_impl = {
 
 static int signal_frame(void *data) {
 	struct wlr_android_backend *backend = data;
-	if (backend->window) wlr_output_send_frame(&backend->output);
+	if (backend->window) {
+		backend->frame_start = get_current_time_msec();
+		wlr_output_send_frame(&backend->output);
+	}
 	return 0;
 }
 

@@ -14,6 +14,7 @@
 #include <drm_fourcc.h>
 #include <android/hardware_buffer.h>
 #include <android/native_window.h>
+#include <android/trace.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -23,6 +24,7 @@
 #include <wlr/render/drm_format_set.h>
 #include <wlr/render/interface.h>
 #include <wlr/util/log.h>
+#include <wlr/util/addon.h>
 #include <wlr/util/transform.h>
 #include "backend/android.h"
 #include "util/matrix.h"
@@ -52,6 +54,8 @@ struct android_texture {
 	GLenum target;
 	EGLImageKHR image;
 	bool swizzle, opaque;
+	bool render_target;
+	struct wlr_addon addon;
 };
 
 struct android_pass {
@@ -115,6 +119,7 @@ static GLuint program(const char *fragment) {
 
 static void texture_destroy(struct wlr_texture *base) {
 	struct android_texture *t = wl_container_of(base, t, base);
+	if (t->render_target) wlr_addon_finish(&t->addon);
 	if (make_current(t->renderer)) {
 		glDeleteTextures(1, &t->name);
 	}
@@ -122,7 +127,7 @@ static void texture_destroy(struct wlr_texture *base) {
 		eglDestroyImageKHR(t->renderer->display, t->image);
 	}
 	wl_list_remove(&t->link);
-	if (t->buffer) {
+	if (t->buffer && !t->render_target) {
 		wlr_buffer_unlock(t->buffer);
 	}
 	free(t);
@@ -264,10 +269,27 @@ static const struct wlr_texture_impl texture_impl = {
 	.preferred_read_format = texture_preferred_read_format,
 };
 
+static void target_destroy(struct wlr_addon *addon) {
+	struct android_texture *t = wl_container_of(addon, t, addon);
+	texture_destroy(&t->base);
+}
+
+static const struct wlr_addon_interface target_addon_impl = {
+	.name = "android-render-target",
+	.destroy = target_destroy,
+};
+
 static struct android_texture *import_texture(struct android_renderer *r,
 		struct wlr_buffer *buffer, bool render_target) {
 	if (!make_current(r)) {
 		return NULL;
+	}
+	if (render_target) {
+		struct wlr_addon *addon = wlr_addon_find(&buffer->addons, r, &target_addon_impl);
+		if (addon) {
+			struct android_texture *t = wl_container_of(addon, t, addon);
+			return t;
+		}
 	}
 	struct android_texture *t = calloc(1, sizeof(*t));
 	if (!t) {
@@ -307,6 +329,13 @@ static struct android_texture *import_texture(struct android_renderer *r,
 		t->buffer = wlr_buffer_lock(buffer);
 	} else if (render_target || !upload_shm(t, buffer)) {
 		goto fail;
+	}
+	if (render_target) {
+		/* The swapchain owns the buffer. An addon releases this import on
+		 * resize/destruction without keeping old swapchain buffers alive. */
+		wlr_addon_init(&t->addon, &buffer->addons, r, &target_addon_impl);
+		t->render_target = true;
+		wlr_buffer_unlock(buffer);
 	}
 	return t;
 fail:
@@ -432,11 +461,12 @@ static void add_rect(struct wlr_render_pass *base,
 
 static bool submit(struct wlr_render_pass *base) {
 	struct android_pass *pass = wl_container_of(base, pass, base);
+	ATrace_beginSection("anlabwc scene finish");
 	glFinish();
+	ATrace_endSection();
 	GLenum error = glGetError();
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glDeleteFramebuffers(1, &pass->framebuffer);
-	texture_destroy(&pass->target->base);
 	free(pass);
 	if (error != GL_NO_ERROR) {
 		wlr_log(WLR_ERROR, "Android scene pass failed: GL 0x%x", error);
@@ -475,7 +505,6 @@ static struct wlr_render_pass *begin_pass(struct wlr_renderer *base,
 	if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glDeleteFramebuffers(1, &pass->framebuffer);
-		texture_destroy(&pass->target->base);
 		free(pass);
 		return NULL;
 	}
@@ -488,7 +517,7 @@ static struct wlr_render_pass *begin_pass(struct wlr_renderer *base,
 
 bool android_renderer_present(struct wlr_renderer *base, struct wlr_buffer *buffer) {
 	struct android_renderer *r = wl_container_of(base, r, base);
-	struct android_texture *t = import_texture(r, buffer, false);
+	struct android_texture *t = import_texture(r, buffer, true);
 	if (!t) {
 		return false;
 	}
@@ -505,10 +534,11 @@ bool android_renderer_present(struct wlr_renderer *base, struct wlr_buffer *buff
 			.filter_mode=WLR_SCALE_FILTER_NEAREST,
 			.blend_mode=WLR_RENDER_BLEND_MODE_NONE,
 		});
+		ATrace_beginSection("anlabwc output finish");
 		glFinish();
+		ATrace_endSection();
 		ok = glGetError() == GL_NO_ERROR && eglSwapBuffers(r->display, r->surface);
 	}
-	texture_destroy(&t->base);
 	if (ok && (++r->frames == 1 || r->frames % 120 == 0)) {
 		char totals[384];
 		snprintf(totals, sizeof(totals), "frames=%" PRIu64

@@ -22,6 +22,7 @@ struct wlr_android_backend {
 	struct wlr_output output;
 	struct wl_event_source *frame_timer;
 	int frame_delay;
+	int64_t frame_start;
 
 	struct wlr_pointer pointer;
 	struct wlr_touch touch;
